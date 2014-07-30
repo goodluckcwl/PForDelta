@@ -1,0 +1,7 @@
+Before executing make, please carry out the following steps :
+
+- unload the PGI environment and load the GNU environment. The boost library does not work with the PGI compilers.
+	module swap PrgEnv-pgi PrgEnv-gnu
+
+- load the boost module
+	module load boost

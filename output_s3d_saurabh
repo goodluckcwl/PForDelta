@@ -1,0 +1,98 @@
+
+
+test_saurabh start
+
+Compressing bin no. 0 : 431188, verified compression
+Compressing bin no. 1 : 154820, verified compression
+Compressing bin no. 2 : 164693, verified compression
+Compressing bin no. 3 : 238507, verified compression
+Compressing bin no. 4 : 404294, verified compression
+Compressing bin no. 5 : 468192, verified compression
+Compressing bin no. 6 : 1113303, verified compression
+Compressing bin no. 7 : 1465160, verified compression
+Compressing bin no. 8 : 1999373, verified compression
+Compressing bin no. 9 : 2466013, verified compression
+Compressing bin no. 10 : 3015354, verified compression
+Compressing bin no. 11 : 4718067, verified compression
+Compressing bin no. 12 : 10186945, verified compression
+Compressing bin no. 13 : 172056726, verified compression
+Compressing bin no. 14 : 2759329, verified compression
+Compressing bin no. 15 : 1928163, verified compression
+Compressing bin no. 16 : 1592324, verified compression
+Compressing bin no. 17 : 1402529, verified compression
+Compressing bin no. 18 : 1281787, verified compression
+Compressing bin no. 19 : 1197941, verified compression
+Compressing bin no. 20 : 1135787, verified compression
+Compressing bin no. 21 : 1087064, verified compression
+Compressing bin no. 22 : 2081120, verified compression
+Compressing bin no. 23 : 2019996, verified compression
+Compressing bin no. 24 : 2016324, verified compression
+Compressing bin no. 25 : 2061311, verified compression
+Compressing bin no. 26 : 2151833, verified compression
+Compressing bin no. 27 : 2288799, verified compression
+Compressing bin no. 28 : 2473426, verified compression
+Compressing bin no. 29 : 2720915, verified compression
+Compressing bin no. 30 : 2976816, verified compression
+Compressing bin no. 31 : 3205589, verified compression
+Compressing bin no. 32 : 3445786, verified compression
+Compressing bin no. 33 : 3733288, verified compression
+Compressing bin no. 34 : 3983735, verified compression
+Compressing bin no. 35 : 4178024, verified compression
+Compressing bin no. 36 : 4204681, verified compression
+Compressing bin no. 37 : 4134866, verified compression
+Compressing bin no. 38 : 6711019, verified compression
+Compressing bin no. 39 : 2747686, verified compression
+
+Compression
+Maximum throughput = 50.3856 MB/s, for bin size = 1592324 elements
+Avg. throughput = 49.1235 MB/s
+Minimum throughput = 46.8682 MB/s, for bin size = 172056726 elements
+Compression ratio = 3.92604
+
+Decompressing bin : 0
+Decompressing bin : 1
+Decompressing bin : 2
+Decompressing bin : 3
+Decompressing bin : 4
+Decompressing bin : 5
+Decompressing bin : 6
+Decompressing bin : 7
+Decompressing bin : 8
+Decompressing bin : 9
+Decompressing bin : 10
+Decompressing bin : 11
+Decompressing bin : 12
+Decompressing bin : 13
+Decompressing bin : 14
+Decompressing bin : 15
+Decompressing bin : 16
+Decompressing bin : 17
+Decompressing bin : 18
+Decompressing bin : 19
+Decompressing bin : 20
+Decompressing bin : 21
+Decompressing bin : 22
+Decompressing bin : 23
+Decompressing bin : 24
+Decompressing bin : 25
+Decompressing bin : 26
+Decompressing bin : 27
+Decompressing bin : 28
+Decompressing bin : 29
+Decompressing bin : 30
+Decompressing bin : 31
+Decompressing bin : 32
+Decompressing bin : 33
+Decompressing bin : 34
+Decompressing bin : 35
+Decompressing bin : 36
+Decompressing bin : 37
+Decompressing bin : 38
+Decompressing bin : 39
+
+
+Decompression
+Maximum throughput = 194.079 MB/s
+Avg. throughput = 182.186 MB/s
+Minimum throughput = 168.199 MB/s
+Application 1458751 resources: utime ~40s, stime ~4s
