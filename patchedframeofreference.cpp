@@ -58,6 +58,183 @@ static uint32_t highest_set_bit(uint64_t value) {
 
 	return single_set_bit(value);
 }
+bool ridConversion(uint64_t rid/*relative to local src selectoin*/, uint64_t *srcstart, uint64_t *srccount, uint64_t *deststart, uint64_t *destcount,
+		int dim, uint64_t *relativeRid  );
+
+uint64_t ridConversionWithoutChecking(uint64_t rid/*relative to local src selectoin*/,
+		uint64_t *srcstart, uint64_t *srccount, uint64_t *deststart, uint64_t *destcount,
+		int dim);
+
+
+bool PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withCheck(const void *buffer,
+		uint32_t buffer_capacity, uint32_t &data_size,
+		uint32_t &significant_data_size, uint32_t &buffer_size, uint64_t *srcstart //PG region dimension
+		, uint64_t *srccount, uint64_t *deststart //region dimension of Selection box
+		, uint64_t *destcount, int dim, bmap_t **bmap) {
+	data_size = 0;
+
+	uint32_t effectDecodedSize = 0;
+
+	//temporal data holder, mainly used for take the decompressed delta value.
+	// This strategy is for memory efficiency purpose
+	uint32_t *data = (uint32_t *) malloc(sizeof(uint32_t) * kBatchSize);
+	memset(data, 0, sizeof(uint32_t) * kBatchSize);
+
+	uint32_t word; //tmp variable
+	uint64_t rid; // NOTE: summary of all RIDs could exceed to uint32_t
+	uint64_t newRid;
+
+	if (buffer_capacity < kHeaderSize) {
+		LOG_WARNING_RETURN_FAIL("invalid buffer size = %u \n", buffer_size)
+		;
+	}
+
+	Header header;
+	header.read(buffer);
+
+	if (header.fixed_length_ == 32) {
+		uint32_t req_buffer_size = sizeof(uint64_t)
+				+ (header.significant_data_size_ * get_exception_value_size(
+						header.exception_type_) + sizeof(uint64_t) - 1)
+						/ sizeof(uint64_t) * sizeof(uint64_t);
+
+		decode_as_exceptions(header.exception_type_, data,
+				header.significant_data_size_,
+				(const char *) buffer + header.encoded_size_);
+
+		rid = header.frame_of_reference_;
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+			rid = rid + data[index];
+			if ( ridConversion(rid,  srcstart,srccount,deststart, destcount, dim, &newRid )  ){
+				word = (uint32_t) (newRid >> 6);
+				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+				// increase decoded number
+				effectDecodedSize ++;
+			}
+		}
+
+	} else {
+
+		if (header.fixed_length_ != 1) {
+			fixed_length_decode((const char *) buffer + sizeof(uint64_t),
+					PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
+					header.fixed_length_, data, kBatchSize);
+
+			patch_exceptions_new(header.exception_type_, data,
+					header.first_exception_, header.significant_data_size_,
+					(const char *) buffer + header.encoded_size_);
+
+			rid = header.frame_of_reference_;
+			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+				rid = rid + data[index];
+				if ( ridConversion(rid,  srcstart,srccount,deststart, destcount, dim, &newRid )  ){
+						word = (uint32_t) (newRid >> 6);
+						(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+						// increase decoded number
+						effectDecodedSize ++;
+				}
+			}
+		} else { //decode for b =1 case
+
+			decode_ones_zeros(buffer, &header, data); // data is recovered RIDs
+			for(uint32_t i = 0; i < significant_data_size; i ++){
+				if ( ridConversion(rid,  srcstart,srccount,deststart, destcount, dim, &newRid )  ){
+					word = (uint32_t) (newRid >> 6);
+					(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+					// increase decoded number
+					effectDecodedSize ++;
+				}
+			}
+		}
+
+	}
+	data_size = kBatchSize;
+	significant_data_size =  effectDecodedSize;
+	buffer_size = header.encoded_size_;
+	free(data);
+	return true;
+}
+
+
+
+bool PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withoutCheck(const void *buffer,
+		uint32_t buffer_capacity, uint32_t &data_size,
+		uint32_t &significant_data_size, uint32_t &buffer_size, uint64_t *srcstart //PG region dimension
+		, uint64_t *srccount, uint64_t *deststart //region dimension of Selection box
+		, uint64_t *destcount, int dim, bmap_t **bmap) {
+	data_size = 0;
+
+	//temporal data holder, mainly used for take the decompressed delta value.
+	// This strategy is for memory efficiency purpose
+	uint32_t *data = (uint32_t *) malloc(sizeof(uint32_t) * kBatchSize);
+	memset(data, 0, sizeof(uint32_t) * kBatchSize);
+
+	uint32_t word; //tmp variable
+	uint64_t rid; // NOTE: summary of all RIDs could exceed to uint32_t
+	uint64_t newRid;
+
+	if (buffer_capacity < kHeaderSize) {
+		LOG_WARNING_RETURN_FAIL("invalid buffer size = %u \n", buffer_size)
+		;
+	}
+
+	Header header;
+	header.read(buffer);
+
+	if (header.fixed_length_ == 32) {
+		uint32_t req_buffer_size = sizeof(uint64_t)
+				+ (header.significant_data_size_ * get_exception_value_size(
+						header.exception_type_) + sizeof(uint64_t) - 1)
+						/ sizeof(uint64_t) * sizeof(uint64_t);
+
+		decode_as_exceptions(header.exception_type_, data,
+				header.significant_data_size_,
+				(const char *) buffer + header.encoded_size_);
+
+		rid = header.frame_of_reference_;
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+			rid = rid + data[index];
+			newRid = ridConversionWithoutChecking(rid, srcstart,srccount,deststart, destcount, dim);
+			word = (uint32_t) (newRid >> 6);
+			(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+		}
+
+	} else {
+
+		if (header.fixed_length_ != 1) {
+			fixed_length_decode((const char *) buffer + sizeof(uint64_t),
+					PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
+					header.fixed_length_, data, kBatchSize);
+
+			patch_exceptions_new(header.exception_type_, data,
+					header.first_exception_, header.significant_data_size_,
+					(const char *) buffer + header.encoded_size_);
+
+			rid = header.frame_of_reference_;
+			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+				rid = rid + data[index];
+				newRid = ridConversionWithoutChecking(rid, srcstart,srccount,deststart, destcount, dim);
+				word = (uint32_t) (newRid >> 6);
+				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+			}
+		} else { //decode for b =1 case
+
+			decode_ones_zeros(buffer, &header, data); // data is recovered RIDs
+			for(uint32_t i = 0; i < significant_data_size; i ++){
+				newRid = ridConversionWithoutChecking(data[i], srcstart,srccount,deststart, destcount, dim);
+				word = (uint32_t) (newRid >> 6);
+				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+			}
+		}
+
+	}
+	data_size = kBatchSize;
+	significant_data_size = header.significant_data_size_;
+	buffer_size = header.encoded_size_;
+	free(data);
+	return true;
+}
+
 
 
 
@@ -230,6 +407,7 @@ int coordinateConversion(int * coordinates, const  int dim, const  uint64_t *src
 /* Give a rid that is relative to a src region
  * return a rid that is relative to dest selection box
  * Assume all the start & count array has slowest dimension at first position
+ * TODO:optimize this
  */
 uint64_t ridConversionWithoutChecking(uint64_t rid/*relative to local src selectoin*/,
 		uint64_t *srcstart, uint64_t *srccount, uint64_t *deststart, uint64_t *destcount,

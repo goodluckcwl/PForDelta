@@ -21,6 +21,142 @@ using namespace pfor;
 extern "C" {
 #endif
 
+/*
+ * rle decoding to bitmap in another dimension space
+ */
+uint32_t runlength_decode_rids_to_selbox(bool isPGContained /*1: PG space is fully contained in the selection box, 0: intersected*/
+, const char *input, uint64_t inputLength, uint64_t *srcstart //PG region dimension
+		, uint64_t *srccount, uint64_t *deststart //region dimension of Selection box
+		, uint64_t *destcount, int dim, void **bitmap) {
+	bmap_t ** bmap = (bmap_t **) bitmap;
+	uint32_t remaining_length = inputLength;
+	uint32_t current_length = 0;
+
+	uint32_t decodedDataElm = 0;
+
+	if (isPGContained == true) {
+
+		while (remaining_length > 0) {
+			const char *current_buffer = (input + current_length);
+
+			uint32_t data_size = *(const uint32_t *) current_buffer;
+
+			current_buffer += sizeof(uint32_t);
+			current_length += sizeof(uint32_t);
+			remaining_length -= sizeof(uint32_t);
+
+			uint32_t remaining_data = data_size;
+			// When PG is within the selection box,
+			// it does not filter out RID during decoding
+			decodedDataElm += remaining_data;
+
+			while (remaining_data >= PatchedFrameOfReference::kBatchSize) {
+				uint32_t actual_data_size;
+				uint32_t actual_significant_data_size;
+				uint32_t actual_buffer_size;
+
+				if (!PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withoutCheck(
+						current_buffer, remaining_length, actual_data_size,
+						actual_significant_data_size, actual_buffer_size,
+						 srcstart, srccount, deststart,
+						destcount, dim, bmap)) {
+					return 0;
+				}
+				if (actual_data_size != PatchedFrameOfReference::kBatchSize
+						|| actual_significant_data_size
+								!= PatchedFrameOfReference::kBatchSize) {
+					return 0;
+				}
+
+				current_buffer += actual_buffer_size;
+				current_length += actual_buffer_size;
+				remaining_length -= actual_buffer_size;
+
+				remaining_data -= PatchedFrameOfReference::kBatchSize;
+			}
+			if (remaining_data > 0) {
+				uint32_t temp_data[PatchedFrameOfReference::kBatchSize] = { 0 };
+
+				uint32_t actual_data_size;
+				uint32_t actual_significant_data_size;
+				uint32_t actual_buffer_size;
+
+				if (!PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withoutCheck(
+						current_buffer, remaining_length, actual_data_size,
+						actual_significant_data_size, actual_buffer_size,
+						 srcstart, srccount, deststart,
+						destcount, dim, bmap)) {
+					return 0;
+				}
+
+				if (actual_data_size != PatchedFrameOfReference::kBatchSize
+						|| actual_significant_data_size != remaining_data) {
+				}
+
+				current_buffer += actual_buffer_size;
+				current_length += actual_buffer_size;
+				remaining_length -= actual_buffer_size;
+				remaining_data -= remaining_data;
+			}
+		}
+		if (remaining_length != 0) {
+			return 0;
+		}
+	} else {
+		const char *current_buffer = (input + current_length);
+
+		uint32_t data_size = *(const uint32_t *) current_buffer;
+
+		current_buffer += sizeof(uint32_t);
+		current_length += sizeof(uint32_t);
+		remaining_length -= sizeof(uint32_t);
+
+		uint32_t remaining_data = data_size;
+		//cout << "reached here" << endl;
+		uint32_t actual_significant_data_size;
+		while (remaining_data >= PatchedFrameOfReference::kBatchSize) {
+			uint32_t actual_data_size;
+			uint32_t actual_buffer_size;
+
+			if (!PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withCheck(
+					current_buffer, remaining_length, actual_data_size,
+					actual_significant_data_size, actual_buffer_size,  srcstart, srccount, deststart, destcount, dim, bmap)) {
+				return 0;
+			}
+
+			current_buffer += actual_buffer_size;
+			current_length += actual_buffer_size;
+			remaining_length -= actual_buffer_size;
+
+			remaining_data -= PatchedFrameOfReference::kBatchSize;
+			decodedDataElm += actual_significant_data_size;
+		}
+		if (remaining_data > 0) {
+			uint32_t temp_data[PatchedFrameOfReference::kBatchSize] = { 0 };
+
+			uint32_t actual_data_size;
+			uint32_t actual_buffer_size;
+
+			if (!PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withCheck(
+					current_buffer, remaining_length, actual_data_size,
+					actual_significant_data_size, actual_buffer_size, srcstart, srccount, deststart, destcount, dim, bmap)) {
+				return 0;
+			}
+
+			decodedDataElm += actual_significant_data_size;
+			current_buffer += actual_buffer_size;
+			current_length += actual_buffer_size;
+			remaining_length -= actual_buffer_size;
+			remaining_data -= remaining_data;
+		}
+		if (remaining_length != 0) {
+			return 0;
+		}
+	}
+
+	return decodedDataElm;
+}
+
 
 
 //BitExp

@@ -41,6 +41,10 @@ uint32_t decode_rids_to_selbox(
 						,void **bmap);
 
 
+uint32_t runlength_decode_rids_to_selbox(bool isPGContained /*1: PG space is fully contained in the selection box, 0: intersected*/
+, const char *input, uint64_t inputLength, uint64_t *srcstart //PG region dimension
+		, uint64_t *srccount, uint64_t *deststart //region dimension of Selection box
+		, uint64_t *destcount, int dim, void **bitmap);
 
 /*
  * PFD

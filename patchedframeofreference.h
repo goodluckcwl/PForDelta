@@ -38,6 +38,19 @@ public:
 	/************END OF USED FOR INPSEC THE PFORDETLA */
 
 
+	static  bool rle_decode_every_batch_to_selbox_withCheck(const void *buffer,
+			uint32_t buffer_capacity, uint32_t &data_size,
+			uint32_t &significant_data_size, uint32_t &buffer_size, uint64_t *srcstart //PG region dimension
+			, uint64_t *srccount, uint64_t *deststart //region dimension of Selection box
+			, uint64_t *destcount, int dim, bmap_t **bmap);
+
+	static bool rle_decode_every_batch_to_selbox_withoutCheck(const void *buffer,
+			uint32_t buffer_capacity, uint32_t &data_size,
+			uint32_t &significant_data_size, uint32_t &buffer_size, uint64_t *srcstart //PG region dimension
+			, uint64_t *srccount, uint64_t *deststart //region dimension of Selection box
+			, uint64_t *destcount, int dim, bmap_t **bmap);
+
+
 	static bool batch_decode_within_selbox_with_checking(const void *buffer,
 				uint32_t buffer_capacity,
 				uint32_t &data_size, uint32_t &significant_data_size,
