@@ -195,23 +195,19 @@ uint32_t pfordelta_block_size();
 
 
 
-/***********************************
- * Adaptive PFD
- *encode: for b =1 case, encoding with RPFD
- *encode:  for b > 1 case, encoding w/ EPFD
- */
 
-int adaptive_encode_rids(const uint32_t *input, uint32_t inputCount, char *output, uint64_t *outputLength);
+/* Following function is particular for the case in which the data candidate check requires
+ * any compressed form to been decoded into RIDs
+ * */
 
+//BitRun
+int adios_runlength_decode_rid(const char *input, uint64_t inputLength, uint32_t *output, uint32_t *outputCount);
 
-int adpative_decode_rids(const char *input, uint64_t inputLength,void **bmap);
+//BitExp
+int adios_expand_decode_rid(const char *input, uint64_t inputLength, uint32_t *output, uint32_t *outputCount);
 
-
-/*******END OF Adaptive PFD ****************/
-
-
-
-
+//BitRun-BitExp
+int adios_expand_runlength_decode_rid(const char *input, uint64_t inputLength, uint32_t *output, uint32_t *outputCount);
 
 
 #ifdef __cplusplus

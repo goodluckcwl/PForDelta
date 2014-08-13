@@ -59,6 +59,149 @@ static uint32_t highest_set_bit(uint64_t value) {
 	return single_set_bit(value);
 }
 
+
+
+bool PatchedFrameOfReference::rle_decode_every_batch_to_rids(const void *buffer,
+		uint32_t buffer_capacity, uint32_t &data_size,
+		uint32_t &significant_data_size, uint32_t &buffer_size, uint32_t *output /*it moves every batch*/) {
+	data_size = 0;
+	significant_data_size = 0;
+
+	//temporal data holder, mainly used for take the decompressed delta value.
+	// This strategy is for memory efficiency purpose
+	uint32_t *data = (uint32_t *) malloc(sizeof(uint32_t) * kBatchSize);
+	memset(data, 0, sizeof(uint32_t) * kBatchSize);
+
+	uint32_t word; //tmp variable
+	uint64_t rid; // NOTE: summary of all RIDs could exceed to uint32_t
+
+	if (buffer_capacity < kHeaderSize) {
+		LOG_WARNING_RETURN_FAIL("invalid buffer size = %u \n", buffer_size)
+		;
+	}
+
+	Header header;
+	header.read(buffer);
+
+	if (header.fixed_length_ == 32) {
+		uint32_t req_buffer_size = sizeof(uint64_t)
+				+ (header.significant_data_size_ * get_exception_value_size(
+						header.exception_type_) + sizeof(uint64_t) - 1)
+						/ sizeof(uint64_t) * sizeof(uint64_t);
+
+		decode_as_exceptions(header.exception_type_, data,
+				header.significant_data_size_,
+				(const char *) buffer + header.encoded_size_);
+
+		rid = header.frame_of_reference_;
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+			rid = rid + data[index];
+			output[index] = rid;
+		}
+
+	} else {
+
+		if (header.fixed_length_ != 1) {
+			fixed_length_decode((const char *) buffer + sizeof(uint64_t),
+					PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
+					header.fixed_length_, data, kBatchSize);
+
+			patch_exceptions_new(header.exception_type_, data,
+					header.first_exception_, header.significant_data_size_,
+					(const char *) buffer + header.encoded_size_);
+
+			rid = header.frame_of_reference_;
+			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+				rid = rid + data[index];
+				output[index] = rid;
+			}
+		} else { //decode for b =1 case
+
+			decode_ones_zeros(buffer, &header, output);
+		}
+
+	}
+	data_size = kBatchSize;
+	significant_data_size = header.significant_data_size_;
+	buffer_size = header.encoded_size_;
+	free(data);
+	return true;
+}
+
+
+bool PatchedFrameOfReference::decode_ones_zeros(const void * buffer,
+		Header * h, uint32_t *output) {
+	uint32_t exception_count = h->first_exception_;// this filed is twisted
+	uint32_t exception_value_size =
+			get_exception_value_size(h->exception_type_);
+
+	uint8_t * ones = (uint8_t *) buffer + sizeof(uint64_t) + (exception_count
+			- 1) * exception_value_size;
+
+	switch (h->exception_type_) {
+	case EXCEPTION_UNSIGNED_CHAR:
+		return decode_ones_zeros_typed<unsigned char> (ones, h,
+				(unsigned char *) ((const char *) buffer + sizeof(uint64_t)),
+				output);
+
+	case EXCEPTION_SIGNED_CHAR:
+		return decode_ones_zeros_typed<signed char> (ones, h,
+				(signed char *) ((const char *) buffer + sizeof(uint64_t)),
+				output);
+
+	case EXCEPTION_UNSIGNED_SHORT:
+		return decode_ones_zeros_typed<unsigned short> (ones, h,
+				(unsigned short *) ((const char *) buffer + sizeof(uint64_t)),
+				output);
+
+	case EXCEPTION_SIGNED_SHORT:
+		return decode_ones_zeros_typed<signed short> (ones, h,
+				(signed short *) ((const char *) buffer + sizeof(uint64_t)),
+				output);
+
+	case EXCEPTION_UNSIGNED_INT:
+		return decode_ones_zeros_typed<unsigned int> (ones, h,
+				(unsigned int *) ((const char *) buffer + sizeof(uint64_t)),
+				output);
+
+	case EXCEPTION_SIGNED_INT:
+		return decode_ones_zeros_typed<signed int> (ones, h,
+				(signed int *) ((const char *) buffer + sizeof(uint64_t)),
+				output);
+
+	default:
+		LOG_WARNING_RETURN_FAIL("unknown exception type: ", (int)h->exception_type_)
+		;
+	}
+
+}
+
+
+template<class ExceptionValueType>
+bool PatchedFrameOfReference::decode_ones_zeros_typed(
+		const uint8_t *ones, Header *h, const ExceptionValueType *exceptions, uint32_t *output) {
+	uint32_t exception_count = h->first_exception_;// this filed is twisted
+	uint32_t rid = h->frame_of_reference_; //the skip rid ( first zero)
+	int index = 0, tmp = 0;;
+	for (int i = 0; i < exception_count; i++) {
+		// create RIDs for ones
+		tmp = 0;
+		while (tmp < ones[i]){
+			rid = rid +1; // increase 1 every time
+			output[index] = rid;
+			tmp ++ ;
+			index ++;
+		}
+		rid += exceptions[i]; // rest zeros
+	}
+
+}
+
+
+
+
+
+
 int coordinateConversion(int * coordinates, const  int dim, const  uint64_t *srcstart, const  uint64_t *deststart, const  uint64_t *destend){
 
 //	printf("local PG coordinate : [%d, %d, %d ] \n", coordinates[0], coordinates[1], coordinates[2]);

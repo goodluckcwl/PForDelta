@@ -140,6 +140,13 @@ public:
 				uint32_t buffer_capacity,
 				uint32_t &data_size, uint32_t &significant_data_size,
 				uint32_t &buffer_size, bmap_t **bmap);
+
+
+	static bool rle_decode_every_batch_to_rids(const void *buffer,
+					uint32_t buffer_capacity,
+					uint32_t &data_size, uint32_t &significant_data_size,
+					uint32_t &buffer_size, uint32_t *output);
+
 	/*******************END ******************/
 
 	/*************** expansion + runlength encode & decode ******************/
@@ -380,6 +387,16 @@ private:
 	static bool expand_exceptions_binary(
 			const void * buffer, Header * h , bmap_t **bitmap);
 
+
+
+
+	static bool decode_ones_zeros(const void * buffer,
+				Header * h, uint32_t *output);
+
+	template<class ExceptionValueType>
+	static bool decode_ones_zeros_typed(
+			const uint8_t *ones, Header *h ,
+			const ExceptionValueType *exceptions, uint32_t *output);
 
 /***********************profile varying exception number *******************/
 

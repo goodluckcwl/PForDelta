@@ -21,6 +21,94 @@ using namespace pfor;
 extern "C" {
 #endif
 
+
+
+//BitExp
+//Decoding of BitExp is same as PForDelta decoding
+int adios_expand_decode_rid(const char *input, uint64_t inputLength, uint32_t *output, uint32_t *outputCount){
+	return decode_rids(input,inputLength, output, outputCount); // decode
+}
+
+//BitRun
+int adios_runlength_decode_rid(const char *input, uint64_t inputLength, uint32_t *output, uint32_t *outputCount){
+
+	    uint32_t remaining_length = inputLength;
+		uint32_t current_length = 0;
+		uint32_t *current_data = output;
+		*outputCount = 0;
+		while (remaining_length > 0) {
+			const char *current_buffer = (input + current_length);
+			uint32_t data_size = *(const uint32_t *) current_buffer;
+
+			current_buffer += sizeof(uint32_t);
+			current_length += sizeof(uint32_t);
+			remaining_length -= sizeof(uint32_t);
+
+			uint32_t remaining_data = data_size;
+			while (remaining_data >= PatchedFrameOfReference::kBatchSize) {
+				uint32_t actual_data_size;
+				uint32_t actual_significant_data_size;
+				uint32_t actual_buffer_size;
+
+				if (!PatchedFrameOfReference::rle_decode_every_batch_to_rids(
+						current_buffer, remaining_length, actual_data_size,
+						actual_significant_data_size, actual_buffer_size, current_data)) {
+					return PRINT_ERROR_RETURN_FAIL("RLE decode failed \n ")
+					;
+				}
+				if (actual_data_size != PatchedFrameOfReference::kBatchSize
+						|| actual_significant_data_size
+								!= PatchedFrameOfReference::kBatchSize) {
+					return PRINT_ERROR_RETURN_FAIL("RLE decode size not match")
+					;
+				}
+
+				current_buffer += actual_buffer_size;
+				current_length += actual_buffer_size;
+				remaining_length -= actual_buffer_size;
+
+				*outputCount += actual_significant_data_size;
+				current_data += PatchedFrameOfReference::kBatchSize;
+				remaining_data -= PatchedFrameOfReference::kBatchSize;
+			}
+			if (remaining_data > 0) {
+				uint32_t temp_data[PatchedFrameOfReference::kBatchSize] = { 0 };
+				uint32_t actual_data_size;
+				uint32_t actual_significant_data_size;
+				uint32_t actual_buffer_size;
+
+				if (!PatchedFrameOfReference::rle_decode_every_batch_to_rids(
+						current_buffer, remaining_length, actual_data_size,
+						actual_significant_data_size, actual_buffer_size, temp_data)) {
+					return 0;
+				}
+
+				memcpy(current_data, temp_data,
+						actual_significant_data_size * sizeof(uint32_t));
+
+				current_buffer += actual_buffer_size;
+				current_length += actual_buffer_size;
+				remaining_length -= actual_buffer_size;
+
+				*outputCount += actual_significant_data_size;
+				current_data += remaining_data;
+				remaining_data -= remaining_data;
+			}
+		}
+		if (remaining_length != 0) {
+			return 0;
+		}
+		return 1;
+}
+
+int adios_expand_runlength_decode_rid(const char *input, uint64_t inputLength, uint32_t *output, uint32_t *outputCount){
+	return adios_runlength_decode_rid(input,inputLength,output,outputCount);
+}
+
+
+
+
+
 uint32_t decode_rids_to_selbox(bool isPGContained /*1: PG space is fully contained in the selection box, 0: intersected*/
 , const char *input, uint64_t inputLength, uint64_t *srcstart //PG region dimension
 		, uint64_t *srccount, uint64_t *deststart //region dimension of Selection box
@@ -215,56 +303,6 @@ int expand_runlength_decode_rids(const char *input, uint64_t inputLength,
 	rle_decode_rids(input, inputLength, bitmap);
 }
 
-/*
- * adaptive encoding: NOT USING NOW
- */
-int adaptive_encode_rids(const uint32_t *input, uint32_t inputCount,
-		char *output, uint64_t *outputLength) {
-	*((uint32_t *) output) = inputCount;
-	*outputLength = sizeof(uint32_t);
-	output += sizeof(uint32_t);
-
-	const uint32_t *current_data = input;
-	uint32_t remaining_data = inputCount;
-
-	char *current_buffer = output;
-	char temp_buffer[PatchedFrameOfReference::kSufficientBufferCapacity];
-	uint32_t temp_buffer_size;
-
-	while (remaining_data >= PatchedFrameOfReference::kBatchSize) {
-		if (!PatchedFrameOfReference::expand_encode(current_data,
-				PatchedFrameOfReference::kBatchSize,
-				PatchedFrameOfReference::kBatchSize, temp_buffer,
-				sizeof(temp_buffer), temp_buffer_size)) {
-			return 0;
-		}
-		memcpy(current_buffer, temp_buffer, temp_buffer_size);
-		*outputLength += temp_buffer_size;
-
-		current_buffer += temp_buffer_size;
-		current_data += PatchedFrameOfReference::kBatchSize;
-		remaining_data -= PatchedFrameOfReference::kBatchSize;
-
-	}
-
-	if (remaining_data > 0) {
-		uint32_t temp_data[PatchedFrameOfReference::kBatchSize] = { 0 };
-		memcpy(temp_data, current_data, remaining_data * sizeof(uint32_t));
-
-		if (!PatchedFrameOfReference::expand_encode(temp_data,
-				PatchedFrameOfReference::kBatchSize, remaining_data,
-				temp_buffer, sizeof(temp_buffer), temp_buffer_size)) {
-			return 0;
-		}
-		memcpy(current_buffer, temp_buffer, temp_buffer_size);
-		*outputLength += temp_buffer_size;
-
-		current_buffer += temp_buffer_size;
-		current_data += remaining_data;
-		remaining_data -= remaining_data;
-	}
-	return 1;
-}
 
 /*
  * expansion encode
