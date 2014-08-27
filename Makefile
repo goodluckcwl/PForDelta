@@ -1,3 +1,6 @@
+BOOSTDIR=/home/xczou/build/boost_1_53_0
+INSTALLDIR=~/build/sith/pfordelta-adios
+
 all: rpfdexp expperf
 
 HFILES= \
@@ -38,7 +41,7 @@ DOFILES= \
  # test_pfordelta.o
 
 CFLAGS_INCLUDE += \
-  -I/home/xczou/build/boost_1_53_0
+   -I$(BOOSTDIR)/include
 #  -I/home/xczou/build/timer/include \
   #-I. \
   #-I/usr/local/include/ \
@@ -84,6 +87,13 @@ unittest: $(DOFILES)
 
 libridcompress.a: patchedframeofreference.o gen_fixedlengthcode.o pfordelta-c-interface.o
 	ar rcs libridcompress.a patchedframeofreference.o gen_fixedlengthcode.o pfordelta-c-interface.o
+
+install:
+	mkdir -p $(INSTALLDIR)
+	mkdir -p $(INSTALLDIR)/lib
+	mkdir -p $(INSTALLDIR)/include
+	cp *.h $(INSTALLDIR)/include
+	cp *.a $(INSTALLDIR)/include
 
 clean:
 	rm -f unittest *.o *.a
