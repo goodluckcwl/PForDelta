@@ -404,10 +404,12 @@ int coordinateConversion(int * coordinates, const  int dim, const  uint64_t *src
 }
 
 
+
 /* Give a rid that is relative to a src region
  * return a rid that is relative to dest selection box
  * Assume all the start & count array has slowest dimension at first position
- * TODO:optimize this
+ *
+ * NOTE: ***************** NOT USED ANY MORE ******************************
  */
 uint64_t ridConversionWithoutChecking(uint64_t rid/*relative to local src selectoin*/,
 		uint64_t *srcstart, uint64_t *srccount, uint64_t *deststart, uint64_t *destcount,
@@ -487,6 +489,9 @@ bool ridConversion(uint64_t rid/*relative to local src selectoin*/, uint64_t *sr
 }
 
 
+
+
+
 bool PatchedFrameOfReference::batch_decode_within_selbox_without_checking(const void *buffer,
 		uint32_t buffer_capacity, uint32_t &data_size,
 		uint32_t &significant_data_size, uint32_t &buffer_size, uint64_t *srcstart //PG region dimension
@@ -516,13 +521,6 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_without_checking(const 
 		decode_as_exceptions(header.exception_type_, data,
 				header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
-		rid = header.frame_of_reference_;
-		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-			rid = rid + data[index];
-			newRid = ridConversionWithoutChecking(rid, srcstart,srccount,deststart, destcount, dim);
-			word = (uint32_t) (newRid >> 6);
-			(*bmap)[word] |= PRECALED2[newRid & 0x3F];
-		}
 
 	} else {
 
@@ -533,17 +531,96 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_without_checking(const 
 		patch_exceptions_new(header.exception_type_, data,
 				header.first_exception_, header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
+	}
 
-		rid = header.frame_of_reference_;
+	rid = header.frame_of_reference_;
+    // for performance reason
+	if ( dim == 1 ){
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+				rid = rid + data[index];
+				newRid = rid + srcstart[0] - deststart[0];
+				word = (uint32_t) (newRid >> 6);
+				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+		}
+	}else if (dim ==2 ){
+		int coordinates[2];
+		uint64_t destend[2];
+		destend[0] = deststart[0] + destcount[0] -1;
+		destend[1] = deststart[1] + destcount[1] -1;
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 			rid = rid + data[index];
-			newRid = ridConversionWithoutChecking(rid, srcstart,srccount,deststart, destcount, dim);
+			coordinates[0] = rid / (srccount[1]);
+			coordinates[1] = rid % (srccount[1] );
+			newRid = coordinates[1] + coordinates[0] * destcount[1] ;
 			word = (uint32_t) (newRid >> 6);
 			(*bmap)[word] |= PRECALED2[newRid & 0x3F];
-
 		}
+	}else if ( dim == 3 ){
+
+		int coordinates[3];
+		uint64_t destend[3];
+		destend[0] = deststart[0] + destcount[0] -1;
+		destend[1] = deststart[1] + destcount[1] -1;
+		destend[2] = deststart[2] + destcount[2] -1;
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+				rid = rid + data[index];
+				coordinates[0] = rid / (srccount[1] * srccount[2]);
+				coordinates[1] = (rid % (srccount[1] * srccount[2])) / srccount[2];
+				coordinates[2] = (rid % (srccount[1] * srccount[2])) % srccount[2] ;
+				newRid = coordinates[2] + coordinates[1] * destcount[2] + coordinates[0]* destcount[1] * destcount[2];
+
+				word = (uint32_t) (newRid >> 6);
+				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+		}
+	}else if (dim >= 4){
+
+		uint64_t * coordinates = (uint64_t *) malloc(sizeof(uint64_t) * dim);
+
+		int i=0, j = 0, k;
+		uint64_t tmpSize;
+		uint64_t remain;
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+				rid = rid + data[index];
+
+				// rid to coordinates in the src region
+				j = 0;
+				tmpSize = 1;
+				remain = rid;
+				while ( j < dim){ // j is the dimension to been set
+					k = j + 1;
+					tmpSize = 1;
+					while ( k < dim){
+						tmpSize *= srccount[k];
+						k++;
+					}
+					coordinates[j] = remain / tmpSize ;
+					remain = remain  %  tmpSize;
+					j ++;
+				}
+
+				for(i = 0; i < dim ; i ++){
+					coordinates[i] += (srcstart[i] - deststart[i]);
+				}
+
+				//coordinates to rid in the dest region
+				tmpSize = 1;
+				newRid = 0;
+				for (i = 0; i < dim; i ++){
+					tmpSize = coordinates[i];
+					for ( j = i + 1; j < dim ; j ++ ){
+						tmpSize = tmpSize * destcount[j];
+					}
+					newRid = newRid + tmpSize;
+				}
+
+				word = (uint32_t) (newRid >> 6);
+				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+		}
+		free(coordinates);
+
 
 	}
+
 	data_size = kBatchSize;
 	significant_data_size = header.significant_data_size_;
 	buffer_size = header.encoded_size_;
@@ -584,18 +661,6 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_with_checking(const voi
 		decode_as_exceptions(header.exception_type_, data,
 				header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
-		rid = header.frame_of_reference_;
-		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-			rid = rid + data[index];
-			if ( ridConversion(rid,  srcstart,srccount,deststart, destcount, dim, &newRid )  ){
-				word = (uint32_t) (newRid >> 6);
-				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
-				// increase decoded number
-				significant_data_size ++;
-			}
-
-		}
-
 	} else {
 
 		fixed_length_decode((const char *) buffer + sizeof(uint64_t),
@@ -605,19 +670,156 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_with_checking(const voi
 		patch_exceptions_new(header.exception_type_, data,
 				header.first_exception_, header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
-
-		rid = header.frame_of_reference_;
+	}
+	rid = header.frame_of_reference_;
+	if ( dim == 1 ){
+		uint64_t coordinates, destend;
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 			rid = rid + data[index];
-			if ( ridConversion(rid,  srcstart,srccount,deststart, destcount, dim, &newRid )  ){
-				word = (uint32_t) (newRid >> 6);
+
+			destend = deststart[0] + destcount[0] -1 ;
+			coordinates =  rid + srcstart[0]; /*global coordinate*/
+			if (coordinates < deststart[0] || coordinates > destend ){
+				continue ;
+			}
+			newRid = coordinates - deststart[0];
+			word = (uint32_t) (newRid >> 6);
+			(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+			// increase decoded number
+			significant_data_size ++;
+		}
+
+	}else if (dim == 2) {
+
+		uint64_t coordinates[2]= {0}, destend[2]={0};
+		destend[0] = deststart[0] + destcount[0] -1 ;
+		destend[1] = deststart[1] + destcount[1] -1 ;
+
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+			rid = rid + data[index];
+
+			coordinates[0] = rid / (srccount[1]);
+			coordinates[1] = rid % (srccount[1] );
+
+			coordinates[0] += (srcstart[0] /*global coordinate*/ );
+			if ( coordinates[0] < deststart[0] || coordinates[0] > destend[0])
+				continue;
+
+			coordinates[1] += (srcstart[1] /*global coordinate*/ );
+			if ( coordinates[1] < deststart[1] || coordinates[1] > destend[1])
+				continue;
+
+			/*change coordinate to the destination box*/
+			coordinates[0] -=  deststart[0];
+			coordinates[1] -=  deststart[1];
+			newRid= coordinates[1] + coordinates[0] * destcount[1] ;
+			word = (uint32_t) (newRid >> 6);
 				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
 				// increase decoded number
 				significant_data_size ++;
-			}
 		}
 
+	}else if (dim == 3) {
+
+		uint64_t coordinates[3]= {0}, destend[3]={0};
+		destend[0] = deststart[0] + destcount[0] -1 ;
+		destend[1] = deststart[1] + destcount[1] -1 ;
+		destend[2] = deststart[2] + destcount[2] -1 ;
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+			rid = rid + data[index];
+
+			coordinates[0] = rid / (srccount[1] * srccount[2]) ;
+			coordinates[1] = (rid % (srccount[1] * srccount[2])) / srccount[2];
+			coordinates[2] = (rid % (srccount[1] * srccount[2])) % srccount[2] ;
+
+			coordinates[0] += (srcstart[0] /*global coordinate*/ );
+			if ( coordinates[0] < deststart[0] || coordinates[0] > destend[0])
+				return false;
+
+			coordinates[1] += (srcstart[1] /*global coordinate*/ );
+			if ( coordinates[1] < deststart[1] || coordinates[1] > destend[1])
+				return false;
+
+			coordinates[2] += (srcstart[2] /*global coordinate*/ );
+			if ( coordinates[2] < deststart[2] || coordinates[2] > destend[2])
+				return false;
+
+			/*change coordinate to the destination box*/
+			coordinates[0] -=  deststart[0];
+			coordinates[1] -=  deststart[1];
+			coordinates[2] -=  deststart[2];
+			newRid = coordinates[2] + coordinates[1] * destcount[2] + coordinates[0]* destcount[1] * destcount[2];
+			word = (uint32_t) (newRid >> 6);
+				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+				// increase decoded number
+				significant_data_size ++;
+		}
+
+	}else if (dim >= 4){
+		int i = 0;
+		uint64_t * coordinates = (uint64_t *) malloc(sizeof(uint64_t) * dim);
+		uint64_t * destend = (uint64_t *) malloc(sizeof(uint64_t) * dim);
+		for(i=0; i < dim ; i ++){
+			destend[i] = deststart[i] + destcount[i] -1;
+		}
+
+		//calculate coordinates
+		int j = 0, k;
+		uint64_t tmpSize = 1;
+
+		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
+			rid = rid + data[index];
+
+			j = 0;
+			tmpSize = 1;
+			uint64_t remain = rid;
+			while ( j < dim){ // j is the dimension to been set
+				k = j + 1;
+				tmpSize = 1;
+				while ( k < dim){
+					tmpSize *= srccount[k];
+					k++;
+				}
+				coordinates[j] = remain / tmpSize ;
+				remain = remain  %  tmpSize;
+				j ++;
+			}
+
+			bool outBoundary = false ;
+			for (i = 0; i < dim; i++) {
+				coordinates[i] += (srcstart[i] /*global coordinate*/ );
+				if ( coordinates[i] < deststart[i] || coordinates[i] > destend[i]){
+					outBoundary = true;
+					continue;
+				}
+			}
+			if (outBoundary)  continue ;
+
+			/*change coordinate to the destination box*/
+			for (i = 0; i < dim; i++) {
+				coordinates[i] -=  deststart[i];
+			}
+
+			newRid = 0;
+			for (i = 0; i < dim; i ++){
+				tmpSize = coordinates[i];
+				for ( j = i + 1; j < dim ; j ++ ){
+					tmpSize = tmpSize * destcount[j];
+				}
+				newRid = newRid + tmpSize;
+			}
+
+			word = (uint32_t) (newRid >> 6);
+			(*bmap)[word] |= PRECALED2[newRid & 0x3F];
+			// increase decoded number
+			significant_data_size ++;
+		}
+		free(coordinates);
+		free(destend);
 	}
+
+
+
 	data_size = kBatchSize;
 	buffer_size = header.encoded_size_;
 	free(data);
