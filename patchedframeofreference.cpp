@@ -539,6 +539,10 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_without_checking(const 
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 				rid = rid + data[index];
 				newRid = rid + srcstart[0] - deststart[0];
+#ifdef RIDBUG
+		    cout << rid << "->" << newRid  <<",";
+//			printf("%"PRIu32"->%"PRIu32",", rid, newRid);
+#endif
 				word = (uint32_t) (newRid >> 6);
 				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
 		}
@@ -551,7 +555,18 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_without_checking(const 
 			rid = rid + data[index];
 			coordinates[0] = rid / (srccount[1]);
 			coordinates[1] = rid % (srccount[1] );
+
+			coordinates[0] += (srcstart[0] - deststart[0] /*global coordinate*/ );
+			coordinates[1] += (srcstart[1] - deststart[1] /*global coordinate*/ );
+
+
 			newRid = coordinates[1] + coordinates[0] * destcount[1] ;
+
+#ifdef RIDBUG
+		    cout << rid << "->" << newRid  <<",";
+//			printf("%"PRIu32"->%"PRIu32",", rid, newRid);
+#endif
+
 			word = (uint32_t) (newRid >> 6);
 			(*bmap)[word] |= PRECALED2[newRid & 0x3F];
 		}
@@ -567,8 +582,19 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_without_checking(const 
 				coordinates[0] = rid / (srccount[1] * srccount[2]);
 				coordinates[1] = (rid % (srccount[1] * srccount[2])) / srccount[2];
 				coordinates[2] = (rid % (srccount[1] * srccount[2])) % srccount[2] ;
+
+
+				coordinates[0] += (srcstart[0] - deststart[0] /*global coordinate*/ );
+				coordinates[1] += (srcstart[1] - deststart[1] /*global coordinate*/ );
+				coordinates[2] += (srcstart[2] - deststart[2] /*global coordinate*/ );
+
+
 				newRid = coordinates[2] + coordinates[1] * destcount[2] + coordinates[0]* destcount[1] * destcount[2];
 
+#ifdef RIDBUG
+			    cout << rid << "->" << newRid  <<"," ;
+//			printf("%"PRIu32"->%"PRIu32",", rid, newRid);
+#endif
 				word = (uint32_t) (newRid >> 6);
 				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
 		}
@@ -612,6 +638,11 @@ bool PatchedFrameOfReference::batch_decode_within_selbox_without_checking(const 
 					}
 					newRid = newRid + tmpSize;
 				}
+
+#ifdef RIDBUG
+			    cout << rid << "->" << newRid <<",";
+//			printf("%"PRIu32"->%"PRIu32",", rid, newRid);
+#endif
 
 				word = (uint32_t) (newRid >> 6);
 				(*bmap)[word] |= PRECALED2[newRid & 0x3F];
