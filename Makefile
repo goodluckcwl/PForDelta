@@ -1,44 +1,14 @@
 BOOSTDIR=/home/xczou/build/boost_1_53_0
-INSTALLDIR=~/build/sith/pfordelta-adios
+INSTALLDIR=./build
 
-all: rpfdexp expperf
+all: libridcompress.a
 
-HFILES= \
-  patchedframeofreference.h \
-  varbyte.h \
-  pfordelta.h \
-  common.h \
-  pfordelta-c-interface.h
-
-EXP_PERF_DOTFILES= \
-  patchedframeofreference.o \
-  gen_fixedlengthcode.o \
-  pfordelta.o \
-  common.o \
-  pfordelta-c-interface.o \
-  test_exception_vs_nonexception.o \
-
-
-RPF_EXP_DOTFILES= \
-  patchedframeofreference.o \
-  gen_fixedlengthcode.o \
-  pfordelta.o \
-  common.o \
-  pfordelta-c-interface.o \
-  test_rpfd_exp.o \
 
 DOFILES= \
   patchedframeofreference.o \
   gen_fixedlengthcode.o \
-  pfordelta.o \
-  common.o \
   pfordelta-c-interface.o \
-  test_patchedframeofreference.o \
-  #test_exception_vs_nonexception.o \
- # varbyte.o \
-  #test_compare.o \
-  # test_interface.o \
- # test_pfordelta.o
+
 
 CFLAGS_INCLUDE += \
    -I$(BOOSTDIR)/include
@@ -53,6 +23,8 @@ DCXXFLAGS += \
   $(CFLAGS_INCLUDE) \
   $(CFLAGS_MACRO) \
   -g \
+  -E \
+  # kill the warning for __VA_ARGS__
   #-O2 \
   #-Wall \
   #-Wno-missing-braces \
@@ -76,11 +48,6 @@ CXX ?= g++
 %.o: %.cpp $(HFILES)
 	$(CXX) -o $@ $(DCXXFLAGS) -c $*.cpp
 
-rpfdexp: $(RPF_EXP_DOTFILES)
-	$(CXX) -o $@ $+ $(UNITTEST_LDFLAGS)
-	
-expperf: $(EXP_PERF_DOTFILES)
-	$(CXX) -o $@ $+ $(UNITTEST_LDFLAGS)
 
 unittest: $(DOFILES)
 	$(CXX) -o $@ $+ $(UNITTEST_LDFLAGS)
@@ -93,7 +60,7 @@ install:
 	mkdir -p $(INSTALLDIR)/lib
 	mkdir -p $(INSTALLDIR)/include
 	cp *.h $(INSTALLDIR)/include
-	cp *.a $(INSTALLDIR)/include
+	cp *.a $(INSTALLDIR)/lib
 
 clean:
 	rm -f unittest *.o *.a

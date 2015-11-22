@@ -112,22 +112,6 @@ public:
 			uint32_t &data_size, uint32_t &significant_data_size,
 			uint32_t &buffer_size, bmap_t **bitmap);
 
-	//duplicate function with `decode_every_batch` only with difference it collect the `b` distribution during decoding
-	static bool inspect_decode_every_batch(const void *buffer,
-				uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
-				uint32_t &data_size, uint32_t &significant_data_size,
-				uint32_t &buffer_size, bmap_t **bitmap
-				,uint64_t b_stat[], uint64_t exp_stat[]);
-
-	static bool inspect_encode_stat(const void *buffer,
-			uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
-			uint32_t &data_size, uint32_t &significant_data_size,
-			uint32_t &buffer_size);
-
-	static bool inspect_binary_stat_while_query(const void *buffer,
-			uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
-			uint32_t &data_size, uint32_t &significant_data_size,
-			uint32_t &buffer_size);
 
 #define PFOR_FIXED_LENGTH_BUFFER_SIZE(FIXED_LENGTH) \
             ((FIXED_LENGTH) * pfor::PatchedFrameOfReference::kBatchSize / 8)
@@ -169,8 +153,6 @@ public:
 				uint32_t buffer_capacity, uint32_t &buffer_size,
 				bool verify = false);
 
-
-
 	/*************** END ******************/
 
 
@@ -199,35 +181,9 @@ public:
 		EXCEPTION_SIGNED_INT
 	};
 
-
-	/************************adaptive encoding & decoding*************/
-
-	static bool adpative_encode_chunk_wise(const uint32_t *data, uint32_t data_size,
-				uint32_t significant_data_size, void *buffer,
-				uint32_t buffer_capacity, uint32_t &buffer_size,
-				bool verify = false);
-
-	static bool adpative_decode_chunk_wise(const void *buffer,
-				uint32_t buffer_capacity,
-				uint32_t &data_size, uint32_t &significant_data_size,
-				uint32_t &buffer_size, bmap_t **bmap);
-
-
-	static bool adaptive_b_determine(const uint32_t *data, uint32_t data_size,
-				uint32_t significant_data_size, uint32_t &fixed_length,
-				uint32_t &frame_of_reference, ExceptionType &exception_type);
-
-
     /**************** end *********************************************/
 
 
-
-
-
-
-
-
-//private:
 	/********************expansion encode & decode *****************/
 
 	static bool determine_b_to_expand(const uint32_t *data, uint32_t data_size,
@@ -269,14 +225,9 @@ public:
 				uint32_t frame_of_reference, ExceptionType exception_type,
 				void *buffer, uint32_t buffer_capacity, uint32_t &buffer_size);
 
-
 	/**********END***********************/
 
 
-	/********************Profile performance of with varying exception numbers*******/
-		static bool profile_exp(const void *buffer, uint32_t buffer_capacity,
-					uint32_t *data, uint32_t data_capacity, uint32_t &data_size,
-					uint32_t &significant_data_size, uint32_t &buffer_size);
 
 
 public:
@@ -287,15 +238,6 @@ public:
 		bool read(const void *buffer);
 
 		bool write(void *buffer) const;
-
-		/*************** hybrid encode/decode support **********/
-/*		bool hybrid_read(const void *buffer);
-		bool hybrid_write(void *buffer) const;*/
-		/*************** END **********************************/
-
-		//            bool read(const boost::array<char, kHeaderSize> &buffer);
-
-		//            bool write(boost::array<char, kHeaderSize> &buffer) const;
 
 		void print();
 
@@ -328,15 +270,6 @@ public:
 	};
 
 private:
-
-	template<class ExceptionValueType>
-	static bool inspect_patch_typed_exceptions_new(uint32_t *data,
-			uint32_t exception_offset, uint32_t significant_data_size,
-			const ExceptionValueType *exceptions, uint32_t fixed_length);
-
-	static bool inspect_patch_exceptions_new(ExceptionType exception_type,
-				uint32_t *data, uint32_t exception_offset,
-				uint32_t significant_data_size, const void *exceptions, const uint32_t fixed_length);
 
 
 	template<class ExceptionValueType>
@@ -401,8 +334,6 @@ private:
 			const void * buffer, Header * h , bmap_t **bitmap);
 
 
-
-
 	static bool decode_ones_zeros(const void * buffer,
 				Header * h, uint32_t *output);
 
@@ -410,21 +341,6 @@ private:
 	static bool decode_ones_zeros_typed(
 			const uint8_t *ones, Header *h ,
 			const ExceptionValueType *exceptions, uint32_t *output);
-
-/***********************profile varying exception number *******************/
-
-		static bool profile_patch_exp(ExceptionType exception_type,
-				uint32_t *data, uint32_t exception_offset,
-				uint32_t significant_data_size, const void *exceptions);
-
-
-		template<class ExceptionValueType>
-		static bool profile_type_patch_exp(uint32_t *data,
-				uint32_t exception_offset, uint32_t significant_data_size,
-				const ExceptionValueType *exceptions);
-
-
-	    /***************************/
 
 
 };
