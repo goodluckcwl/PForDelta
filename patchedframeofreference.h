@@ -104,6 +104,10 @@ public:
 			uint32_t *data, uint32_t data_capacity, uint32_t &data_size,
 			uint32_t &significant_data_size, uint32_t &buffer_size);
 
+	static bool decode_new_to_deltas(const void *buffer, uint32_t buffer_capacity,
+			uint32_t *data, uint32_t data_capacity, uint32_t &data_size,
+			uint32_t &significant_data_size, uint32_t &buffer_size);
+
 	static bool decode_set_bmap(const void *buffer, uint32_t buffer_size,
 			 bmap_t ** bmap);
 
@@ -143,6 +147,7 @@ public:
 					uint32_t buffer_capacity,
 					uint32_t &data_size, uint32_t &significant_data_size,
 					uint32_t &buffer_size, uint32_t *output);
+
 
 	/*******************END ******************/
 

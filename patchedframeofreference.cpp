@@ -236,8 +236,6 @@ bool PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withoutCheck(cons
 }
 
 
-
-
 bool PatchedFrameOfReference::rle_decode_every_batch_to_rids(const void *buffer,
 		uint32_t buffer_capacity, uint32_t &data_size,
 		uint32_t &significant_data_size, uint32_t &buffer_size, uint32_t *output /*it moves every batch*/) {
@@ -1911,6 +1909,45 @@ bool PatchedFrameOfReference::encode(const uint32_t *data, uint32_t data_size,
 
 	return true;
 }
+
+
+bool PatchedFrameOfReference::decode_new_to_deltas(const void *buffer,
+		uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
+		uint32_t &data_size, uint32_t &significant_data_size,
+		uint32_t &buffer_size) {
+	data_size = 0;
+	significant_data_size = 0;
+
+	Header header;
+	header.read(buffer);
+
+	if (header.fixed_length_ == 32) {
+		uint32_t req_buffer_size = sizeof(uint64_t)
+				+ (header.significant_data_size_ * get_exception_value_size(
+						header.exception_type_) + sizeof(uint64_t) - 1)
+						/ sizeof(uint64_t) * sizeof(uint64_t);
+
+		decode_as_exceptions(header.exception_type_, data,
+				header.significant_data_size_,
+				(const char *) buffer + header.encoded_size_);
+		data[0] += header.frame_of_reference_; // rest are deltas
+
+	} else {
+		fixed_length_decode((const char *) buffer + sizeof(uint64_t),
+				PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
+				header.fixed_length_, data, kBatchSize);
+		patch_exceptions_new(header.exception_type_, data,
+				header.first_exception_, header.significant_data_size_,
+				(const char *) buffer + header.encoded_size_);
+
+		data[0] += header.frame_of_reference_; // rest are deltas
+	}
+	data_size = kBatchSize;
+	significant_data_size = header.significant_data_size_;
+	buffer_size = header.encoded_size_;
+	return true;
+}
+
 
 bool PatchedFrameOfReference::decode_new(const void *buffer,
 		uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,

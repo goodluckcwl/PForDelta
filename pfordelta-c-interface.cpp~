@@ -69,7 +69,7 @@ int adios_decode_deltas(const char *input, uint64_t inputLength, uint32_t *outpu
 			uint32_t actual_significant_data_size;
 			uint32_t actual_buffer_size;
 
-			PatchedFrameOfReference::decode_new_to_deltas(current_buffer,
+			PatchedFrameOfReference::decode_new(current_buffer,
 					remaining_length, temp_data,
 					PatchedFrameOfReference::kBatchSize, actual_data_size,
 					actual_significant_data_size, actual_buffer_size);
