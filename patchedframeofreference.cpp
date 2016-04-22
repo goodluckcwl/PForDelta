@@ -236,8 +236,6 @@ bool PatchedFrameOfReference::rle_decode_every_batch_to_selbox_withoutCheck(cons
 }
 
 
-
-
 bool PatchedFrameOfReference::rle_decode_every_batch_to_rids(const void *buffer,
 		uint32_t buffer_capacity, uint32_t &data_size,
 		uint32_t &significant_data_size, uint32_t &buffer_size, uint32_t *output /*it moves every batch*/) {
@@ -375,13 +373,8 @@ bool PatchedFrameOfReference::decode_ones_zeros_typed(
 }
 
 
-
-
-
-
 int coordinateConversion(int * coordinates, const  int dim, const  uint64_t *srcstart, const  uint64_t *deststart, const  uint64_t *destend){
 
-//	printf("local PG coordinate : [%d, %d, %d ] \n", coordinates[0], coordinates[1], coordinates[2]);
 	// change to global coordinate
 	for (int i = 0; i < dim; i++) {
 		coordinates[i] += (srcstart[i] /*global coordinate*/ );
@@ -390,8 +383,6 @@ int coordinateConversion(int * coordinates, const  int dim, const  uint64_t *src
 			return (i+1) * -1;
 		}
 	}
-//	printf("global PG coordinate : [%d, %d, %d ] \n", coordinates[0], coordinates[1], coordinates[2]);
-
 
 	/*change coordinate to the destination box*/
 	for (int i = 0; i < dim; i++) {
@@ -399,7 +390,6 @@ int coordinateConversion(int * coordinates, const  int dim, const  uint64_t *src
 	}
 	return 1;
 
-//	printf("new local PG coordinate : [%d, %d, %d ] \n", coordinates[0], coordinates[1], coordinates[2]);
 
 }
 
@@ -993,192 +983,6 @@ bool PatchedFrameOfReference::expand_runlength_encode(const uint32_t *data,
 
 }
 
-/*
- * copy from determine_b_to_expand function
- * it determine b by expanding it
- * NOT using the adaptive now
- */
-bool PatchedFrameOfReference::adaptive_b_determine(const uint32_t *data,
-		uint32_t data_size, uint32_t significant_data_size,
-		uint32_t &fixed_length, uint32_t &frame_of_reference,
-		ExceptionType &exception_type) {
-
-	frame_of_reference = 0;
-	if (data_size != kBatchSize) {
-		LOG_WARNING_RETURN_FAIL("data size not ", kBatchSize, ": ", data_size)
-		;
-	}
-
-	if (significant_data_size > data_size) {
-		LOG_WARNING_RETURN_FAIL("invalid significant data size: ", significant_data_size)
-		;
-	}
-
-	uint32_t length_counts[32];
-
-	for (uint32_t length = 0; length < 32; ++length) {
-		length_counts[length] = 0;
-	}
-
-	uint32_t mask = 0;
-
-	for (uint32_t idx = 0; idx < kBatchSize; ++idx) {
-		++length_counts[highest_set_bit(data[idx] | 1)];
-		mask |= data[idx];
-	}
-
-	uint32_t mask_bits = highest_set_bit(mask | 1);
-
-	uint32_t exception_value_size;
-
-	if (mask_bits < 8) {
-		exception_type = EXCEPTION_UNSIGNED_CHAR;
-		exception_value_size = 1;
-	} else if (mask_bits < 16) {
-		exception_type = EXCEPTION_UNSIGNED_SHORT;
-		exception_value_size = 2;
-	} else {
-		exception_type = EXCEPTION_UNSIGNED_INT;
-		exception_value_size = 4;
-	}
-
-	uint32_t exception_counts[32];
-
-	exception_counts[31] = 0;
-
-	for (uint32_t length = 31; length > 0; --length) {
-		exception_counts[length - 1] = length_counts[length]
-				+ exception_counts[length];
-	}
-
-	uint32_t best_length;
-	uint32_t best_buffer_size;
-	uint32_t temp_best_buffer_size;
-	uint32_t temp_best_length;
-
-	if (significant_data_size < kSufficientBufferCapacity) {
-		best_length = 0;
-		best_buffer_size = sizeof(uint64_t) + (significant_data_size
-				* exception_value_size + sizeof(uint64_t) - 1)
-				/ sizeof(uint64_t) * sizeof(uint64_t);
-	} else {
-		best_length = 32;
-		best_buffer_size = kSufficientBufferCapacity;
-	}
-
-	for (uint32_t length = 0; length < 32; ++length) {
-		uint32_t buffer_size = required_buffer_size(length + 1,
-				exception_counts[length], exception_value_size);
-		if (buffer_size < best_buffer_size) {
-			best_buffer_size = buffer_size;
-			best_length = length + 1;
-		}
-
-	}
-
-	fixed_length = best_length;
-
-	/*
-	 * ORIGNAL EPFD , remove all exception value or not
-	 */
-
-	/*	for (uint32_t length = (fixed_length+1); length < 32; ++length) {
-	 if (exception_counts[length] == 0){
-	 uint32_t expand_buf_size = required_buffer_size(length + 1,
-	 exception_counts[length], exception_value_size);
-	 if (expand_buf_size < best_buffer_size * 1.5){
-	 fixed_length  = length + 1;
-	 return true;
-	 }
-
-	 }
-	 }*/
-
-	// b = 9, 10 -32 : exceptions
-	// b =8,  9 - 32 exceptions
-	if (fixed_length > 0) {
-		double beta = 201326592000.0; // I/O bandwidth 300MB/sec => bit/sec
-		double p1 = 0.0000000046872;
-		double p2 = 0.00000079534;
-
-		uint32_t n = exception_value_size * sizeof(char); // 8, 16, 32
-		uint32_t D = kBatchSize;
-		uint32_t b = fixed_length;
-
-		for (uint32_t length = (fixed_length + 1); length < 32; ++length) {
-			uint32_t x = length - fixed_length;
-			uint32_t y = exception_counts[fixed_length - 1]
-					- exception_counts[length - 1];
-			uint32_t e = exception_counts[fixed_length - 1]; // # of exception for encoding original b
-			double time_diff = (D * x - n * y) / beta - 2 * p1 * e * y + p1 * y
-					* y - p2 * y;
-			if (time_diff < 0) {
-				fixed_length = length;
-				return true;
-			}
-		}
-	}
-
-	//hard coded, TODO verify
-	// length_counts : a statistical array containing for b = 'x', there is length_counts[x] value in input data which
-	// is encoded by 'x'
-	// exception_counts : from 'x' on, there is total exception_counts[x] value encoded by x to 31. its
-	// a accumulated value
-	/*if (fixed_length == 9 ){ // b = 9
-	 if (exception_counts[10] == 0){ // when summary counts for b=11 -32 is 0, there is no exception.
-	 fixed_length = 11; // expand 9 to 11
-	 }
-	 }*/
-
-	/****FOR VVEL & WVEL ****/
-	/*if (fixed_length == 1 ){ // b = 1
-	 if (exception_counts[8] == 0){ // when summary counts for b=9 -32 is 0, there is no exception.
-	 fixed_length = 9; // expand 1 to 9
-	 }
-	 }*/
-	/****FOR TEMP & UVEL*****/
-	/*if (fixed_length == 1 ){ // b = 1
-	 if (exception_counts[6] == 0){ // when summary counts for b=9 -32 is 0, there is no exception.
-	 fixed_length = 7; // expand 1 to 7
-	 }
-	 }
-	 */
-
-	return true;
-}
-
-bool PatchedFrameOfReference::adpative_encode_chunk_wise(const uint32_t *data,
-		uint32_t data_size, uint32_t significant_data_size, void *buffer,
-		uint32_t buffer_capacity, uint32_t &buffer_size, bool verify) {
-	uint32_t fixed_length;
-	uint32_t frame_of_reference;
-	ExceptionType exception_type;
-
-	uint32_t deltas[PatchedFrameOfReference::kBatchSize] = { 0 };
-	deltas[0] = 0;
-	for (uint32_t index = 1; index < significant_data_size; ++index) {
-		deltas[index] = data[index] - data[index - 1];
-	}
-	for (uint32_t index = significant_data_size; index < kBatchSize; ++index) {
-		deltas[index] = 0;
-	}
-
-	if (!determine_b_to_expand(deltas, data_size, significant_data_size,
-			fixed_length, frame_of_reference, exception_type)) {
-		LOG_WARNING_RETURN_FAIL("failed to find optimal parameters")
-		;
-	}
-	frame_of_reference = data[0];
-
-	if (!encode_param_new(deltas, data_size, significant_data_size,
-			fixed_length, frame_of_reference, exception_type, buffer,
-			buffer_capacity, buffer_size)) {
-		LOG_WARNING_RETURN_FAIL("failed to encode with optimal parameters: ", fixed_length, " ", frame_of_reference)
-		;
-	}
-
-	return true;
-}
 
 bool PatchedFrameOfReference::optimal_param(const uint32_t *data,
 		uint32_t data_size, uint32_t significant_data_size,
@@ -1361,55 +1165,6 @@ bool PatchedFrameOfReference::determine_b_to_expand(const uint32_t *data,
 		}
 	}
 
-	// b = 9, 10 -32 : exceptions
-	// b =8,  9 - 32 exceptions
-	/*
-	 if (fixed_length >  0) {
-	 double beta = 201326592000.0;  // I/O bandwidth 300MB/sec => bit/sec
-	 double p1= 0.0000000046872;
-	 double p2= 0.00000079534;
-
-	 uint32_t n = exception_value_size * sizeof(char); // 8, 16, 32
-	 uint32_t D = kBatchSize;
-	 uint32_t b = fixed_length;
-
-	 for (uint32_t length = (fixed_length+1); length < 32; ++length) {
-	 uint32_t x = length - fixed_length;
-	 uint32_t y = exception_counts[fixed_length-1] - exception_counts[length-1];
-	 uint32_t e = exception_counts[fixed_length-1]; // # of exception for encoding original b
-	 double time_diff = (D*x - n*y )/ beta -2*p1*e*y + p1 * y * y - p2 * y;
-	 if (time_diff < 0) {
-	 fixed_length = length;
-	 return true;
-	 }
-	 }
-	 }
-	 */
-
-	//hard coded, TODO verify
-	// length_counts : a statistical array containing for b = 'x', there is length_counts[x] value in input data which
-	// is encoded by 'x'
-	// exception_counts : from 'x' on, there is total exception_counts[x] value encoded by x to 31. its
-	// a accumulated value
-	/*if (fixed_length == 9 ){ // b = 9
-	 if (exception_counts[10] == 0){ // when summary counts for b=11 -32 is 0, there is no exception.
-	 fixed_length = 11; // expand 9 to 11
-	 }
-	 }*/
-
-	/****FOR VVEL & WVEL ****/
-	/*if (fixed_length == 1 ){ // b = 1
-	 if (exception_counts[8] == 0){ // when summary counts for b=9 -32 is 0, there is no exception.
-	 fixed_length = 9; // expand 1 to 9
-	 }
-	 }*/
-	/****FOR TEMP & UVEL*****/
-	/*if (fixed_length == 1 ){ // b = 1
-	 if (exception_counts[6] == 0){ // when summary counts for b=9 -32 is 0, there is no exception.
-	 fixed_length = 7; // expand 1 to 7
-	 }
-	 }
-	 */
 
 	return true;
 }
@@ -1431,10 +1186,6 @@ bool PatchedFrameOfReference::expand_decode_every_batch(const void *buffer,
 
 	Header header;
 	header.read(buffer);
-	/*if (!header.read(buffer)) {
-	 LOG_WARNING_RETURN_FAIL("invalid buffer header");
-	 }*/
-	//header.print();
 
 
 	if (header.fixed_length_ == 32) {
@@ -1447,16 +1198,7 @@ bool PatchedFrameOfReference::expand_decode_every_batch(const void *buffer,
 				header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
 
-		/*if (header.encoded_size_ < req_buffer_size) {
-		 LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_, " too small for encoded exceptions ",
-		 req_buffer_size);
-		 }
 
-		 if (!decode_as_exceptions(header.exception_type_, data,
-		 header.significant_data_size_,
-		 (const char *) buffer + header.encoded_size_)) {
-		 LOG_WARNING_RETURN_FAIL("failed to decode as exceptions");
-		 }*/
 		rid = header.frame_of_reference_;
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 			rid = rid + data[index];
@@ -1472,22 +1214,6 @@ bool PatchedFrameOfReference::expand_decode_every_batch(const void *buffer,
 				header.first_exception_, header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
 
-		/*if (header.encoded_size_ - sizeof(uint64_t)
-		 < PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_)) {
-		 LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_,
-		 " too small for fixed length ", header.fixed_length_);
-		 }*/
-
-		/*if (!fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-		 PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-		 header.fixed_length_, data, kBatchSize)) {
-		 LOG_WARNING_RETURN_FAIL("failed to decode");
-		 }
-		 if (!patch_exceptions_new(header.exception_type_, data,
-		 header.first_exception_, header.significant_data_size_,
-		 (const char *) buffer + header.encoded_size_)) {
-		 LOG_WARNING_RETURN_FAIL("failed to patch exceptions");
-		 }*/
 
 		rid = header.frame_of_reference_;
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
@@ -1525,14 +1251,6 @@ bool PatchedFrameOfReference::rle_decode_every_batch(const void *buffer,
 
 	Header header;
 	header.read(buffer);
-	/*	if (!header.read(buffer)) {
-	 LOG_WARNING_RETURN_FAIL("invalid buffer header \n ");
-	 }*/
-	//header.print();
-
-	/*if (buffer_capacity < header.encoded_size_) {
-	 LOG_WARNING_RETURN_FAIL("no capacity for encoded size = %u \n", header.encoded_size_);
-	 }*/
 
 	if (header.fixed_length_ == 32) {
 		uint32_t req_buffer_size = sizeof(uint64_t)
@@ -1544,17 +1262,7 @@ bool PatchedFrameOfReference::rle_decode_every_batch(const void *buffer,
 				header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
 
-		/*if (header.encoded_size_ < req_buffer_size) {
-		 LOG_WARNING_RETURN_FAIL("buffer size %u is too small for encoded size %u \n",
-		 req_buffer_size, header.encoded_size_);
-		 }
 
-		 if (!decode_as_exceptions(header.exception_type_, data,
-		 header.significant_data_size_,
-		 (const char *) buffer + header.encoded_size_)) {
-		 LOG_WARNING_RETURN_FAIL("failed to decode as exceptions");
-		 }
-		 */
 		rid = header.frame_of_reference_;
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 			rid = rid + data[index];
@@ -1569,28 +1277,12 @@ bool PatchedFrameOfReference::rle_decode_every_batch(const void *buffer,
 					PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
 					header.fixed_length_, data, kBatchSize);
 
-			/*if (header.encoded_size_ - sizeof(uint64_t)
-			 < PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_)) {
-			 cout << "here 5" << endl;
-			 LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_,
-			 " too small for fixed length ", header.fixed_length_);
-			 }
 
-			 if (!fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-			 PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-			 header.fixed_length_, data, kBatchSize)) {
-			 LOG_WARNING_RETURN_FAIL("failed to decode");
-			 }*/
 			patch_exceptions_new(header.exception_type_, data,
 					header.first_exception_, header.significant_data_size_,
 					(const char *) buffer + header.encoded_size_);
 
-			/*	if (!patch_exceptions_new(header.exception_type_, data,
-			 header.first_exception_, header.significant_data_size_,
-			 (const char *) buffer + header.encoded_size_)) {
-			 LOG_WARNING_RETURN_FAIL("failed to patch exceptions");
-			 }
-			 */
+
 			rid = header.frame_of_reference_;
 			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 				rid = rid + data[index];
@@ -1901,334 +1593,6 @@ bool PatchedFrameOfReference::exception_as_number_of_zeros(
 
 }
 
-/*
- * for b=1 case, the encode string is a binary string which has format 0..01..10..01..1
- * this function will inspect for consecutive number of 0 and 1.
- * output format is (x,y),(x,y)... x means the number of consecutive 0s, y : number of consecutive 1s
- */
-bool PatchedFrameOfReference::inspect_binary_stat_while_query(
-		const void *buffer, uint32_t buffer_capacity, uint32_t *data,
-		uint32_t data_capacity, uint32_t &data_size,
-		uint32_t &significant_data_size, uint32_t &buffer_size) {
-
-	bool noexception = false;
-
-	data_size = 0;
-	significant_data_size = 0;
-	if (data_capacity < kBatchSize) {
-		cout << "here" << endl;
-		LOG_WARNING_RETURN_FAIL("data capacity less than ", kBatchSize, ": ", data_capacity)
-		;
-	}
-
-	if (buffer_capacity < kHeaderSize) {
-		cout << "here 2" << endl;
-		LOG_WARNING_RETURN_FAIL("invalid buffer size ", buffer_size)
-		;
-	}
-
-	Header header;
-	if (!header.read(buffer)) {
-		cout << "here 3" << endl;
-		LOG_WARNING_RETURN_FAIL("invalid buffer header")
-		;
-	}
-	//header.print();
-
-	if (buffer_capacity < header.encoded_size_) {
-		cout << "here 4" << endl;
-		LOG_WARNING_RETURN_FAIL("no capacity for encoded size: ", header.encoded_size_)
-		;
-	}
-
-	if (header.fixed_length_ == 32) {
-		uint32_t req_buffer_size = sizeof(uint64_t)
-				+ (header.significant_data_size_ * get_exception_value_size(
-						header.exception_type_) + sizeof(uint64_t) - 1)
-						/ sizeof(uint64_t) * sizeof(uint64_t);
-
-		if (header.encoded_size_ < req_buffer_size) {
-			LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_, " too small for encoded exceptions ",
-					req_buffer_size)
-			;
-		}
-
-		if (!decode_as_exceptions(header.exception_type_, data,
-				header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_)) {
-			LOG_WARNING_RETURN_FAIL("failed to decode as exceptions")
-			;
-		}
-		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
-			data[index] += data[index - 1];
-		}
-
-		if (header.frame_of_reference_ != 0) {
-			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-				data[index] += header.frame_of_reference_;
-			}
-		}
-	} else {
-		if (header.encoded_size_ - sizeof(uint64_t)
-				< PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_)) {
-			cout << "here 5" << endl;
-			LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_,
-					" too small for fixed length ", header.fixed_length_)
-			;
-		}
-
-		if (!fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-				PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-				header.fixed_length_, data, kBatchSize)) {
-			LOG_WARNING_RETURN_FAIL("failed to decode")
-			;
-		}
-
-		/*********binary string 0..01..10..0 ***********/
-		/********PRINT OUT  [total segs num] [x] [y] [x] [y] ***********/
-		/******** x : # of 0s, y : # of 1s ****************************/
-		if (header.fixed_length_ == 1) {
-			int arr_idx = 0, segs_num = 0, consecutive_num;
-			int len = header.significant_data_size_;
-			int *interleave = (int*) malloc(sizeof(int) * len);
-			for (int l = 0; l < len; l++) {
-				interleave[l] = 1;
-			}
-
-			while (arr_idx < len - 1) {
-				consecutive_num = arr_idx;
-				while (consecutive_num < len - 1 && data[consecutive_num]
-						== data[consecutive_num + 1]) {
-					interleave[segs_num]++;
-					consecutive_num++;
-				}
-				segs_num++;
-				arr_idx = consecutive_num + 1;
-				// last one value is not consecutive with the one before last one 
-				// so,we add that 
-				if (arr_idx == len - 1) {
-					segs_num++;
-				}
-			}
-			/**check the correctness of consecutive calculation ***/
-			/*if (segs_num == 111 && PatchedFrameOfReference::TO_PRINT_SEQ){
-			 PatchedFrameOfReference::TO_PRINT_SEQ = false;
-			 for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-			 cout << data[index] << ",";
-			 }
-			 cout << endl;
-
-			 }*/
-			cout << segs_num << " ";
-			for (int jk = 0; jk < segs_num; jk++) {
-				cout << interleave[jk] << " ";
-			}
-			cout << endl;
-			/*only PRINT out number of consecutive 1s */
-			/*cout << segs_num/2 << " ";
-			 for(int jk = 1; jk < segs_num/2; jk = jk +2) {
-			 cout << interleave[jk] << " ";
-			 }
-			 cout << endl; */
-
-		}
-		/*************END*******/
-
-		if (header.fixed_length_ == 1 && data[header.first_exception_] != 0
-				&& !noexception) {
-			noexception = true;
-		}
-
-		if (!patch_exceptions_new(header.exception_type_, data,
-				header.first_exception_, header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_)) {
-			LOG_WARNING_RETURN_FAIL("failed to patch exceptions")
-			;
-		}
-
-		for (uint32_t index = header.significant_data_size_; index < kBatchSize; ++index) {
-			data[index] = 0;
-		}
-		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
-			data[index] += data[index - 1];
-		}
-		if (header.frame_of_reference_ != 0) {
-			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-				data[index] += header.frame_of_reference_;
-			}
-		}
-
-	}
-
-	data_size = kBatchSize;
-	significant_data_size = header.significant_data_size_;
-	buffer_size = header.encoded_size_;
-
-	/*	if (header.fixed_length_ == 1 )
-	 cout << endl; */
-	return true;
-}
-
-/*Only print out header & exception values*/
-/*bad name, this function is inspecting the `b` value & exception value during DECODING, instead of encode */
-bool PatchedFrameOfReference::inspect_encode_stat(const void *buffer,
-		uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
-		uint32_t &data_size, uint32_t &significant_data_size,
-		uint32_t &buffer_size) {
-
-	bool noexception = false;
-
-	data_size = 0;
-	significant_data_size = 0;
-	//cout << "start decode_new" << endl;
-	if (data_capacity < kBatchSize) {
-		cout << "here" << endl;
-		LOG_WARNING_RETURN_FAIL("data capacity less than ", kBatchSize, ": ", data_capacity)
-		;
-	}
-
-	if (buffer_capacity < kHeaderSize) {
-		cout << "here 2" << endl;
-		LOG_WARNING_RETURN_FAIL("invalid buffer size ", buffer_size)
-		;
-	}
-
-	Header header;
-	if (!header.read(buffer)) {
-		cout << "here 3" << endl;
-		LOG_WARNING_RETURN_FAIL("invalid buffer header")
-		;
-	}
-	//header.print();
-	if (header.fixed_length_ == 1 || header.fixed_length_ == 9)
-		cout << header.fixed_length_ << " ";
-	PatchedFrameOfReference::B_TIMES[header.fixed_length_]++;
-
-	if (buffer_capacity < header.encoded_size_) {
-		cout << "here 4" << endl;
-		LOG_WARNING_RETURN_FAIL("no capacity for encoded size: ", header.encoded_size_)
-		;
-	}
-
-	if (header.fixed_length_ == 32) {
-		uint32_t req_buffer_size = sizeof(uint64_t)
-				+ (header.significant_data_size_ * get_exception_value_size(
-						header.exception_type_) + sizeof(uint64_t) - 1)
-						/ sizeof(uint64_t) * sizeof(uint64_t);
-
-		if (header.encoded_size_ < req_buffer_size) {
-			LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_, " too small for encoded exceptions ",
-					req_buffer_size)
-			;
-		}
-
-		if (!decode_as_exceptions(header.exception_type_, data,
-				header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_)) {
-			LOG_WARNING_RETURN_FAIL("failed to decode as exceptions")
-			;
-		}
-		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
-			data[index] += data[index - 1];
-		}
-
-		if (header.frame_of_reference_ != 0) {
-			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-				data[index] += header.frame_of_reference_;
-			}
-		}
-	} else {
-		if (header.encoded_size_ - sizeof(uint64_t)
-				< PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_)) {
-			cout << "here 5" << endl;
-			LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_,
-					" too small for fixed length ", header.fixed_length_)
-			;
-		}
-
-		if (!fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-				PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-				header.fixed_length_, data, kBatchSize)) {
-			LOG_WARNING_RETURN_FAIL("failed to decode")
-			;
-		}
-
-		if (header.fixed_length_ == 1 && data[header.first_exception_] != 0
-				&& !noexception) {
-			noexception = true;
-		}
-
-		if (!inspect_patch_exceptions_new(header.exception_type_, data,
-				header.first_exception_, header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_,
-				header.fixed_length_)) {
-			LOG_WARNING_RETURN_FAIL("failed to patch exceptions")
-			;
-		}
-		for (uint32_t index = header.significant_data_size_; index < kBatchSize; ++index) {
-			data[index] = 0;
-		}
-		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
-			data[index] += data[index - 1];
-		}
-		if (header.frame_of_reference_ != 0) {
-			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-				data[index] += header.frame_of_reference_;
-			}
-		}
-
-	}
-
-	/*if (header.fixed_length_ ==1  && noexception && PatchedFrameOfReference::TO_PRINT_SEQ){
-	 cout << "seq list ";
-	 for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-	 cout << data[index] << ",";
-	 }
-	 cout << endl;
-	 PatchedFrameOfReference::TO_PRINT_SEQ = false;
-
-	 }*/
-	data_size = kBatchSize;
-	significant_data_size = header.significant_data_size_;
-	buffer_size = header.encoded_size_;
-
-	/*
-	 * PRINT out for first impression on encoding
-	 * */
-	/*switch (header.exception_type_) {
-	 case EXCEPTION_UNSIGNED_CHAR:
-	 cout << sizeof(unsigned char)*8;
-	 break;
-
-	 case EXCEPTION_SIGNED_CHAR:
-	 cout << sizeof(signed char)*8;
-	 break;
-
-	 case EXCEPTION_UNSIGNED_SHORT:
-	 cout << sizeof(unsigned short)*8;
-	 break;
-
-	 case EXCEPTION_SIGNED_SHORT:
-	 cout << sizeof(signed short)*8;
-	 break;
-
-	 case EXCEPTION_UNSIGNED_INT:
-	 cout << sizeof(unsigned int)*8;
-	 break;
-
-	 case EXCEPTION_SIGNED_INT:
-	 cout << sizeof(signed int)*8;
-	 break;
-
-	 default:
-	 LOG_WARNING_RETURN_FAIL("unknown exception type: ", (int)exception_type);
-	 }
-	 */
-	//	cout << header.exception_type_ ;
-	if (header.fixed_length_ == 1 || header.fixed_length_ == 9)
-		cout << endl;
-	return true;
-}
 
 bool PatchedFrameOfReference::decode_set_bmap(const void *buffer,
 		uint32_t buffer_size, bmap_t ** bmap) {
@@ -2236,35 +1600,12 @@ bool PatchedFrameOfReference::decode_set_bmap(const void *buffer,
 	const char *current_buffer = (const char *) buffer;
 	uint32_t remaining_buffer = buffer_size;
 
-	/*if (remaining_buffer < sizeof(uint32_t)) {
-	 LOG_ERROR_RETURN_FAIL("no data size");
-	 }*/
 
 	uint32_t data_size = *(const uint32_t *) current_buffer;
 	uint32_t remaining_data = data_size;
 	current_buffer += sizeof(uint32_t);
 	remaining_buffer -= sizeof(uint32_t);
 
-	/*if (data_size <= NO_COMPRESS_THRESHOLD) {
-	 while (remaining_data > 0) {
-	 data.push_back(*((uint32_t *) current_buffer));
-	 current_buffer += sizeof(uint32_t);
-	 remaining_buffer -= sizeof(uint32_t);
-	 remaining_data--;
-	 }
-	 if (remaining_buffer != 0) {
-	 cout << "remaining buffer not zero " << endl;
-	 LOG_ERROR_RETURN_FAIL("unexpected content");
-	 }
-	 for (uint32_t index = 0; index < data.size(); ++index) {
-	 cout << data[index] << " ";
-	 }
-	 cout << endl;
-
-	 * todo: set value into bmap
-
-	 return true;
-	 }*/
 
 	while (remaining_data >= PatchedFrameOfReference::kBatchSize) {
 		uint32_t actual_data_size;
@@ -2273,19 +1614,6 @@ bool PatchedFrameOfReference::decode_set_bmap(const void *buffer,
 
 		decode_every_batch(current_buffer, remaining_buffer, actual_data_size,
 				actual_significant_data_size, actual_buffer_size, bmap);
-
-		/*if (!decode_every_batch(current_buffer, remaining_buffer,  actual_data_size,
-		 actual_significant_data_size, actual_buffer_size, bmap)) {
-		 LOG_ERROR_RETURN_FAIL("failed to decode a batch");
-		 }
-
-		 release_assert(actual_buffer_size <= remaining_buffer);
-
-		 if (actual_data_size != PatchedFrameOfReference::kBatchSize
-		 || actual_significant_data_size
-		 != PatchedFrameOfReference::kBatchSize) {
-		 LOG_ERROR_RETURN_FAIL("invalid partial batch");
-		 }*/
 
 		current_buffer += actual_buffer_size;
 		remaining_buffer -= actual_buffer_size;
@@ -2303,18 +1631,6 @@ bool PatchedFrameOfReference::decode_set_bmap(const void *buffer,
 		decode_every_batch(current_buffer, remaining_buffer, actual_data_size,
 				actual_significant_data_size, actual_buffer_size, bmap);
 
-		/*if (!decode_every_batch(current_buffer, remaining_buffer, actual_data_size,
-		 actual_significant_data_size, actual_buffer_size, bmap)) {
-		 LOG_ERROR_RETURN_FAIL("failed to decode a batch");
-		 }
-
-		 release_assert(actual_buffer_size <= remaining_buffer);
-
-		 if (actual_data_size != PatchedFrameOfReference::kBatchSize
-		 || actual_significant_data_size != remaining_data) {
-		 LOG_ERROR_RETURN_FAIL("invalid partial batch");
-		 }
-		 */
 		current_buffer += actual_buffer_size;
 		remaining_buffer -= actual_buffer_size;
 
@@ -2326,102 +1642,6 @@ bool PatchedFrameOfReference::decode_set_bmap(const void *buffer,
 	return true;
 }
 
-bool PatchedFrameOfReference::inspect_decode_every_batch(const void *buffer,
-		uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
-		uint32_t &data_size, uint32_t &significant_data_size,
-		uint32_t &buffer_size, bmap_t **bmap, uint64_t b_stat[],
-		uint64_t exp_stat[]) {
-	data_size = 0;
-	significant_data_size = 0;
-	uint32_t word; //tmp variable
-	uint64_t rid; // NOTE: summary of all RIDs could exceed to uint32_t
-
-	if (data_capacity < kBatchSize) {
-		cout << "here" << endl;
-		LOG_WARNING_RETURN_FAIL("data capacity less than ", kBatchSize, ": ", data_capacity)
-		;
-	}
-
-	if (buffer_capacity < kHeaderSize) {
-		cout << "here 2" << endl;
-		LOG_WARNING_RETURN_FAIL("invalid buffer size ", buffer_size)
-		;
-	}
-
-	Header header;
-	if (!header.read(buffer)) {
-		cout << "here 3" << endl;
-		LOG_WARNING_RETURN_FAIL("invalid buffer header")
-		;
-	}
-	//header.print();
-	b_stat[header.fixed_length_]++;
-	if (buffer_capacity < header.encoded_size_) {
-		cout << "here 4" << endl;
-		LOG_WARNING_RETURN_FAIL("no capacity for encoded size: ", header.encoded_size_)
-		;
-	}
-
-	if (header.fixed_length_ == 32) {
-		uint32_t req_buffer_size = sizeof(uint64_t)
-				+ (header.significant_data_size_ * get_exception_value_size(
-						header.exception_type_) + sizeof(uint64_t) - 1)
-						/ sizeof(uint64_t) * sizeof(uint64_t);
-
-		if (header.encoded_size_ < req_buffer_size) {
-			LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_, " too small for encoded exceptions ",
-					req_buffer_size)
-			;
-		}
-
-		if (!decode_as_exceptions(header.exception_type_, data,
-				header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_)) {
-			LOG_WARNING_RETURN_FAIL("failed to decode as exceptions")
-			;
-		}
-		rid = header.frame_of_reference_;
-		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-			rid = rid + data[index];
-			word = (uint32_t) (rid >> 6);
-			(*bmap)[word] |= PRECALED2[rid & 0x3F];
-		}
-
-	} else {
-		if (header.encoded_size_ - sizeof(uint64_t)
-				< PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_)) {
-			cout << "here 5" << endl;
-			LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_,
-					" too small for fixed length ", header.fixed_length_)
-			;
-		}
-
-		if (!fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-				PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-				header.fixed_length_, data, kBatchSize)) {
-			LOG_WARNING_RETURN_FAIL("failed to decode")
-			;
-		}
-		if (!patch_exceptions_new(header.exception_type_, data,
-				header.first_exception_, header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_)) {
-			LOG_WARNING_RETURN_FAIL("failed to patch exceptions")
-			;
-		}
-
-		rid = header.frame_of_reference_;
-		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-			rid = rid + data[index];
-			word = (uint32_t) (rid >> 6);
-			(*bmap)[word] |= PRECALED2[rid & 0x3F];
-		}
-
-	}
-	data_size = kBatchSize;
-	significant_data_size = header.significant_data_size_;
-	buffer_size = header.encoded_size_;
-	return true;
-}
 
 bool PatchedFrameOfReference::decode_every_batch(const void *buffer,
 		uint32_t buffer_capacity, uint32_t &data_size,
@@ -2438,19 +1658,6 @@ bool PatchedFrameOfReference::decode_every_batch(const void *buffer,
 
 	Header header;
 	header.read(buffer);
-	/*if (buffer_capacity < kHeaderSize) {
-	 LOG_WARNING_RETURN_FAIL("invalid buffer size ", buffer_size);
-	 }
-
-	 Header header;
-	 if (!header.read(buffer)) {
-	 LOG_WARNING_RETURN_FAIL("invalid buffer header");
-	 }
-	 *///header.print();
-	/*
-	 if (buffer_capacity < header.encoded_size_) {
-	 LOG_WARNING_RETURN_FAIL("no capacity for encoded size: ", header.encoded_size_);
-	 }*/
 
 	if (header.fixed_length_ == 32) {
 		uint32_t req_buffer_size = sizeof(uint64_t)
@@ -2458,19 +1665,9 @@ bool PatchedFrameOfReference::decode_every_batch(const void *buffer,
 						header.exception_type_) + sizeof(uint64_t) - 1)
 						/ sizeof(uint64_t) * sizeof(uint64_t);
 
-		/*if (header.encoded_size_ < req_buffer_size) {
-		 LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_, " too small for encoded exceptions ",
-		 req_buffer_size);
-		 }*/
 		decode_as_exceptions(header.exception_type_, data,
 				header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
-		/*
-		 if (!decode_as_exceptions(header.exception_type_, data,
-		 header.significant_data_size_,
-		 (const char *) buffer + header.encoded_size_)) {
-		 LOG_WARNING_RETURN_FAIL("failed to decode as exceptions");
-		 }*/
 		rid = header.frame_of_reference_;
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 			rid = rid + data[index];
@@ -2479,12 +1676,6 @@ bool PatchedFrameOfReference::decode_every_batch(const void *buffer,
 		}
 
 	} else {
-		/*if (header.encoded_size_ - sizeof(uint64_t)
-		 < PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_)) {
-		 //			cout << "here 5" << endl;
-		 LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_,
-		 " too small for fixed length ", header.fixed_length_);
-		 }*/
 
 		fixed_length_decode((const char *) buffer + sizeof(uint64_t),
 				PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
@@ -2493,17 +1684,6 @@ bool PatchedFrameOfReference::decode_every_batch(const void *buffer,
 		patch_exceptions_new(header.exception_type_, data,
 				header.first_exception_, header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
-
-		/*if (!fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-		 PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-		 header.fixed_length_, data, kBatchSize)) {
-		 LOG_WARNING_RETURN_FAIL("failed to decode");
-		 }
-		 if (!patch_exceptions_new(header.exception_type_, data,
-		 header.first_exception_, header.significant_data_size_,
-		 (const char *) buffer + header.encoded_size_)) {
-		 LOG_WARNING_RETURN_FAIL("failed to patch exceptions");
-		 }*/
 
 		rid = header.frame_of_reference_;
 		for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
@@ -2602,15 +1782,6 @@ bool PatchedFrameOfReference::decode(const void *buffer, uint32_t buffer_size,
 		uint32_t actual_data_size;
 		uint32_t actual_significant_data_size;
 		uint32_t actual_buffer_size;
-		/*if (! decode(current_buffer, 
-		 remaining_buffer,
-		 temp_data,
-		 PatchedFrameOfReference::kBatchSize,
-		 actual_data_size,
-		 actual_significant_data_size,
-		 actual_buffer_size)) {
-		 LOG_ERROR_RETURN_FAIL("failed to decode a batch");
-		 }*/
 
 		if (!decode_new(current_buffer, remaining_buffer, temp_data,
 				PatchedFrameOfReference::kBatchSize, actual_data_size,
@@ -2739,33 +1910,16 @@ bool PatchedFrameOfReference::encode(const uint32_t *data, uint32_t data_size,
 	return true;
 }
 
-bool PatchedFrameOfReference::decode_new(const void *buffer,
+
+bool PatchedFrameOfReference::decode_new_to_deltas(const void *buffer,
 		uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
 		uint32_t &data_size, uint32_t &significant_data_size,
 		uint32_t &buffer_size) {
 	data_size = 0;
 	significant_data_size = 0;
-	/*if (data_capacity < kBatchSize) {
-	 cout << "here" << endl;
-	 LOG_WARNING_RETURN_FAIL("data capacity less than ", kBatchSize, ": ", data_capacity);
-	 }
-
-	 if (buffer_capacity < kHeaderSize) {
-	 cout << "here 2" << endl;
-	 LOG_WARNING_RETURN_FAIL("invalid buffer size ", buffer_size);
-	 }*/
 
 	Header header;
 	header.read(buffer);
-	/*if (!header.read(buffer)) {
-	 LOG_WARNING_RETURN_FAIL("invalid buffer header");
-	 }*/
-	//header.print();
-
-	/*if (buffer_capacity < header.encoded_size_) {
-	 cout << "here 4" << endl;
-	 LOG_WARNING_RETURN_FAIL("no capacity for encoded size: ", header.encoded_size_);
-	 }*/
 
 	if (header.fixed_length_ == 32) {
 		uint32_t req_buffer_size = sizeof(uint64_t)
@@ -2773,19 +1927,48 @@ bool PatchedFrameOfReference::decode_new(const void *buffer,
 						header.exception_type_) + sizeof(uint64_t) - 1)
 						/ sizeof(uint64_t) * sizeof(uint64_t);
 
-		/*if (header.encoded_size_ < req_buffer_size) {
-		 LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_, " too small for encoded exceptions ",
-		 req_buffer_size);
-		 }*/
+		decode_as_exceptions(header.exception_type_, data,
+				header.significant_data_size_,
+				(const char *) buffer + header.encoded_size_);
+		data[0] += header.frame_of_reference_; // rest are deltas
+
+	} else {
+		fixed_length_decode((const char *) buffer + sizeof(uint64_t),
+				PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
+				header.fixed_length_, data, kBatchSize);
+		patch_exceptions_new(header.exception_type_, data,
+				header.first_exception_, header.significant_data_size_,
+				(const char *) buffer + header.encoded_size_);
+
+		data[0] += header.frame_of_reference_; // rest are deltas
+	}
+	data_size = kBatchSize;
+	significant_data_size = header.significant_data_size_;
+	buffer_size = header.encoded_size_;
+	return true;
+}
+
+
+bool PatchedFrameOfReference::decode_new(const void *buffer,
+		uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
+		uint32_t &data_size, uint32_t &significant_data_size,
+		uint32_t &buffer_size) {
+	data_size = 0;
+	significant_data_size = 0;
+
+	Header header;
+	header.read(buffer);
+
+	if (header.fixed_length_ == 32) {
+		uint32_t req_buffer_size = sizeof(uint64_t)
+				+ (header.significant_data_size_ * get_exception_value_size(
+						header.exception_type_) + sizeof(uint64_t) - 1)
+						/ sizeof(uint64_t) * sizeof(uint64_t);
 
 		decode_as_exceptions(header.exception_type_, data,
 				header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
-		/*if (!decode_as_exceptions(header.exception_type_, data,
-		 header.significant_data_size_,
-		 (const char *) buffer + header.encoded_size_)) {
-		 LOG_WARNING_RETURN_FAIL("failed to decode as exceptions");
-		 }*/
+
 		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
 			data[index] += data[index - 1];
 		}
@@ -2794,11 +1977,7 @@ bool PatchedFrameOfReference::decode_new(const void *buffer,
 			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
 				data[index] += header.frame_of_reference_;
 			}
-			/*cout << "\n\nDecoded block, fixed length = 1\n\n";
-			 for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-			 cout << data[index] << " ";
-			 }*/
-			// cout << endl;
+
 
 		}
 	} else {
@@ -2808,47 +1987,11 @@ bool PatchedFrameOfReference::decode_new(const void *buffer,
 		patch_exceptions_new(header.exception_type_, data,
 				header.first_exception_, header.significant_data_size_,
 				(const char *) buffer + header.encoded_size_);
-		/*if (header.encoded_size_ - sizeof(uint64_t)
-		 < PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_)) {
-		 cout << "here 5" << endl;
-		 LOG_WARNING_RETURN_FAIL("buffer size ", header.encoded_size_,
-		 " too small for fixed length ", header.fixed_length_);
-		 }*/
 
-		//cout << "after print" << endl;     
-		/*if (!fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-		 PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-		 header.fixed_length_, data, kBatchSize)) {
-		 //cout << "failed to decode" << endl;
-		 LOG_WARNING_RETURN_FAIL("failed to decode");
-		 }*/
-		//cout << "after fixed length decode" << endl;
-		/*if (!patch_exceptions_new(header.exception_type_, data,
-		 header.first_exception_, header.significant_data_size_,
-		 (const char *) buffer + header.encoded_size_)) {
-		 LOG_WARNING_RETURN_FAIL("failed to patch exceptions");
-		 }*/
 		data[0] += header.frame_of_reference_;
 		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
 			data[index] += data[index - 1];
 		}
-		//cout << "after pactching exceptions" << endl;
-		/*for (uint32_t index = header.significant_data_size_; index < kBatchSize; ++index) {
-		 data[index] = 0;
-		 }
-		 for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
-		 data[index] += data[index - 1];
-		 }
-		 if (header.frame_of_reference_ != 0) {
-		 for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-		 data[index] += header.frame_of_reference_;
-		 }
-		 }*/
-		/*cout << "Decoded data\n";
-		 for (uint32_t index = 0; index < kBatchSize; ++index) {
-		 cout << data[index] << " ";
-		 }
-		 cout << endl;*/
 
 	}
 	data_size = kBatchSize;
@@ -3029,12 +2172,6 @@ bool PatchedFrameOfReference::encode_param_new(const uint32_t *data,
 
 	} else {
 		/////////////////////////////////////////////////////////////
-		/*if (fixed_length > 32) {
-		 LOG_WARNING_RETURN_FAIL("invalid fixed length: ", fixed_length);
-		 }
-		 if (data_size != kBatchSize) {
-		 LOG_WARNING_RETURN_FAIL("data size not ", kBatchSize, ": ", data_size);
-		 }*/
 
 		uint32_t exception_indexes[kBatchSize + 1];
 		uint32_t adjusted_data[kBatchSize];
@@ -3047,23 +2184,14 @@ bool PatchedFrameOfReference::encode_param_new(const uint32_t *data,
 		} else {
 			max_value = (1 << fixed_length) - 1;
 		}
-		//header.print(); 
-		//cout << "Input data, fixed length = " << fixed_length << endl;    
+
 		for (uint32_t idx = 0; idx < kBatchSize; ++idx) {
-			//uint32_t adjusted_value = data[idx] - frame_of_reference;
-			//cout << data[idx] << " ";
 			uint32_t adjusted_value = data[idx];
 			adjusted_data[idx] = adjusted_value;
 			exception_indexes[exception_count] = idx;
 			exception_count += (uint32_t) (adjusted_value > max_value);
 		}
-		//cout << endl;
 
-		/*cout << "\nException Indexes\n";
-		 for (uint32_t index = 0; index < exception_count; ++index) {
-		 cout << exception_indexes[index] << " ";
-		 }
-		 cout << endl;*/
 		uint32_t req_buffer_size = required_buffer_size(fixed_length,
 				exception_count, exception_value_size);
 
@@ -3079,27 +2207,6 @@ bool PatchedFrameOfReference::encode_param_new(const uint32_t *data,
 		if (exception_count != 0) {
 			*(uint64_t *) ((char *) buffer + sizeof(uint64_t)
 					+ PFOR_FIXED_LENGTH_BUFFER_SIZE(fixed_length)) = 0;
-
-			/****************TO PRINT OUT DELTA AND EXCEPTION VALUE **********/
-
-			/*	if (header.fixed_length_ == 9 && PatchedFrameOfReference::TO_PRINT_SEQ){
-
-			 uint32_t current_idx = exception_indexes[0];
-			 for (uint32_t exception_offset = 0; exception_offset < exception_count; ++exception_offset) {
-			 if (adjusted_data[current_idx] < 512){
-			 PatchedFrameOfReference::TO_PRINT_SEQ = false;
-			 cout << "exception list less than 2^9: ";
-			 cout << adjusted_data[current_idx] << endl;
-			 }
-			 uint32_t next_idx = exception_indexes[exception_offset + 1];
-			 current_idx = next_idx;
-			 }
-
-
-
-			 }*/
-			/****************TO PRINT OUT DELTA AND EXCEPTION VALUE (END)**********/
-
 		}
 
 		//cout << "Exception count = " << exception_count << endl;
@@ -3115,11 +2222,6 @@ bool PatchedFrameOfReference::encode_param_new(const uint32_t *data,
 		for (uint32_t idx = 0; idx < exception_count; ++idx) {
 			adjusted_data[exception_indexes[idx]] = 0;
 		}
-		/*cout << "Intermediate data" << endl;
-		 for (uint32_t idx = 0; idx < kBatchSize; ++idx) {
-		 cout << adjusted_data[idx] << " ";
-		 }
-		 cout << endl;*/
 
 		if (!fixed_length_encode(adjusted_data, kBatchSize,
 				header.fixed_length_, (char *) buffer + sizeof(uint64_t),
@@ -3382,20 +2484,6 @@ bool PatchedFrameOfReference::Header::write(void *buffer) const {
 	return true;
 }
 
-/*bool PatchedFrameOfReference::Header::write(array<char, kHeaderSize> &buffer) const {
- CompactHeader compact_header;
- compact_header.frame_of_reference_ = frame_of_reference_;
- compact_header.first_exception_ = first_exception_;
- compact_header.significant_data_size_ = significant_data_size_;
- compact_header.fixed_length_ = (fixed_length_ - 1);
- compact_header.exception_type_ = (uint32_t)exception_type_;
- release_assert(encoded_size_ % sizeof(uint64_t) == 0);
- compact_header.encoded_size_ = encoded_size_ / sizeof(uint64_t);
-
- *(CompactHeader *)&buffer[0] = compact_header;
-
- return true;
- }*/
 
 void PatchedFrameOfReference::Header::print() {
 	cout << "Frame of reference =" << frame_of_reference_ << " ,";
@@ -3660,190 +2748,3 @@ bool PatchedFrameOfReference::encode_as_exceptions(
 	return true;
 }
 
-bool PatchedFrameOfReference::inspect_patch_exceptions_new(
-		ExceptionType exception_type, uint32_t *data,
-		uint32_t exception_offset, uint32_t significant_data_size,
-		const void *exceptions, uint32_t fixed_length) {
-	switch (exception_type) {
-	case EXCEPTION_UNSIGNED_CHAR:
-		return inspect_patch_typed_exceptions_new<unsigned char> (data,
-				exception_offset, significant_data_size,
-				(const unsigned char *) exceptions, fixed_length);
-
-	case EXCEPTION_SIGNED_CHAR:
-		return inspect_patch_typed_exceptions_new<signed char> (data,
-				exception_offset, significant_data_size,
-				(const signed char *) exceptions, fixed_length);
-
-	case EXCEPTION_UNSIGNED_SHORT:
-		return inspect_patch_typed_exceptions_new<unsigned short> (data,
-				exception_offset, significant_data_size,
-				(const unsigned short *) exceptions, fixed_length);
-
-	case EXCEPTION_SIGNED_SHORT:
-		return inspect_patch_typed_exceptions_new<signed short> (data,
-				exception_offset, significant_data_size,
-				(const signed short *) exceptions, fixed_length);
-
-	case EXCEPTION_UNSIGNED_INT:
-		return inspect_patch_typed_exceptions_new<unsigned int> (data,
-				exception_offset, significant_data_size,
-				(const unsigned int *) exceptions, fixed_length);
-
-	case EXCEPTION_SIGNED_INT:
-		return inspect_patch_typed_exceptions_new<signed int> (data,
-				exception_offset, significant_data_size,
-				(const signed int *) exceptions, fixed_length);
-
-	default:
-		LOG_WARNING_RETURN_FAIL("unknown exception type: %d \n", (int)exception_type)
-		;
-	}
-}
-
-template<class ExceptionValueType>
-bool PatchedFrameOfReference::inspect_patch_typed_exceptions_new(
-		uint32_t *data, uint32_t exception_offset,
-		uint32_t significant_data_size, const ExceptionValueType *exceptions,
-		uint32_t fixed_length) {
-
-	uint32_t exp_num = 0;
-	if (fixed_length == 1 || fixed_length == 9) {
-
-		memset(PatchedFrameOfReference::H_BITS_EXP, 0, sizeof(uint64_t) * 33);
-		while (exception_offset < significant_data_size) {
-			if (data[exception_offset] == 0) {
-				data[exception_offset] = (uint32_t) *--exceptions;
-
-				uint32_t hsb = highest_set_bit(data[exception_offset]) + 1;
-				/*if (fixed_length == 9 && hsb < fixed_length) {
-				 cout << "exception value encoded less than b=9 "
-				 << data[exception_offset] << endl;
-				 }*/
-
-				PatchedFrameOfReference::H_BITS_EXP[hsb]++;
-				exp_num++;
-
-			}
-			++exception_offset;
-		}
-		for (int r = 1; r <= 32; r++) {
-			cout << PatchedFrameOfReference::H_BITS_EXP[r] << " ";
-		}
-	} else {
-		while (exception_offset < significant_data_size) {
-			if (data[exception_offset] == 0) {
-				data[exception_offset] = (uint32_t) *--exceptions;
-				exp_num++;
-			}
-			++exception_offset;
-		}
-
-	}
-	PatchedFrameOfReference::EXP_SIZE[exp_num]++;
-
-	return true;
-}
-
-bool PatchedFrameOfReference::profile_exp(const void *buffer,
-		uint32_t buffer_capacity, uint32_t *data, uint32_t data_capacity,
-		uint32_t &data_size, uint32_t &significant_data_size,
-		uint32_t &buffer_size) {
-	data_size = 0;
-	significant_data_size = 0;
-
-	Header header;
-	header.read(buffer);
-
-	if (header.fixed_length_ == 32) {
-		uint32_t req_buffer_size = sizeof(uint64_t)
-				+ (header.significant_data_size_ * get_exception_value_size(
-						header.exception_type_) + sizeof(uint64_t) - 1)
-						/ sizeof(uint64_t) * sizeof(uint64_t);
-
-		decode_as_exceptions(header.exception_type_, data,
-				header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_);
-
-		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
-			data[index] += data[index - 1];
-		}
-
-		if (header.frame_of_reference_ != 0) {
-			for (uint32_t index = 0; index < header.significant_data_size_; ++index) {
-				data[index] += header.frame_of_reference_;
-			}
-
-		}
-	} else {
-		fixed_length_decode((const char *) buffer + sizeof(uint64_t),
-				PFOR_FIXED_LENGTH_BUFFER_SIZE(header.fixed_length_),
-				header.fixed_length_, data, kBatchSize);
-		profile_patch_exp(header.exception_type_, data,
-				header.first_exception_, header.significant_data_size_,
-				(const char *) buffer + header.encoded_size_);
-
-		data[0] += header.frame_of_reference_;
-		for (uint32_t index = 1; index < header.significant_data_size_; ++index) {
-			data[index] += data[index - 1];
-		}
-
-	}
-	data_size = kBatchSize;
-	significant_data_size = header.significant_data_size_;
-	buffer_size = header.encoded_size_;
-	return true;
-}
-
-bool PatchedFrameOfReference::profile_patch_exp(ExceptionType exception_type,
-		uint32_t *data, uint32_t exception_offset,
-		uint32_t significant_data_size, const void *exceptions) {
-	switch (exception_type) {
-	case EXCEPTION_UNSIGNED_CHAR:
-		return profile_type_patch_exp<unsigned char> (data, exception_offset,
-				significant_data_size, (const unsigned char *) exceptions);
-
-	case EXCEPTION_SIGNED_CHAR:
-		return profile_type_patch_exp<signed char> (data, exception_offset,
-				significant_data_size, (const signed char *) exceptions);
-
-	case EXCEPTION_UNSIGNED_SHORT:
-		return profile_type_patch_exp<unsigned short> (data, exception_offset,
-				significant_data_size, (const unsigned short *) exceptions);
-
-	case EXCEPTION_SIGNED_SHORT:
-		return profile_type_patch_exp<signed short> (data, exception_offset,
-				significant_data_size, (const signed short *) exceptions);
-
-	case EXCEPTION_UNSIGNED_INT:
-		return profile_type_patch_exp<unsigned int> (data, exception_offset,
-				significant_data_size, (const unsigned int *) exceptions);
-
-	case EXCEPTION_SIGNED_INT:
-		return profile_type_patch_exp<signed int> (data, exception_offset,
-				significant_data_size, (const signed int *) exceptions);
-
-	default:
-		LOG_WARNING_RETURN_FAIL("unknown exception type: %d \n", (int)exception_type)
-		;
-	}
-}
-
-template<class ExceptionValueType>
-bool PatchedFrameOfReference::profile_type_patch_exp(uint32_t *data,
-		uint32_t exception_offset, uint32_t significant_data_size,
-		const ExceptionValueType *exceptions) {
-
-	//	int count_exp = 0;
-	//	cout << "decode_exp [";
-	while (exception_offset < significant_data_size) {
-		if (data[exception_offset] == 0) {
-			data[exception_offset] = (uint32_t) *--exceptions;
-			//			cout << exception_offset <<",";
-			//			count_exp ++;
-		}
-		++exception_offset;
-	}
-	//	cout << "],exception number " << count_exp << endl;
-	return true;
-}
