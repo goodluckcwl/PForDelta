@@ -1,0 +1,5 @@
+To build PForDelta, it just needs one simple command: 
+
+  make libridcompress.a
+
+It will output libridcompress.a
